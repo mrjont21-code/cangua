@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Cá ngựa — Lên chuồng</title>
+<style>
+html, body {
+  margin: 0; height: 100%; overflow: hidden;
+  background: #000;
+}
+#bg {
+  position: fixed; inset: 0;
+  background: #000 url('./bg.jpg') center center / contain no-repeat;
+  pointer-events: none;
+  z-index: 0;
+}
+canvas {
+  position: fixed; inset: 0;
+  display: block; width: 100%; height: 100%;
+  z-index: 1;
+}
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "./horse3d.js": "./horse3d.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="bg"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { Horse3D } from './horse3d.js';
+
+/* ═══════════════════════════════════════════════════════════════
+   Tâm mặt bậc CỐ ĐỊNH (pixel ảnh gốc 1081×1455)
+   → tâm đáy đế ngựa mỗi bậc cũng CỐ ĐỊNH
+   ═══════════════════════════════════════════════════════════════ */
+const IMG_W = 1081;
+const IMG_H = 1455;
+
+const STEP_PX = {
+  1: { x: 501, y: 1136 },
+  2: { x: 571, y: 888 },
+  3: { x: 641, y: 672 },
+  4: { x: 705, y: 488 },
+  5: { x: 771, y: 324 },
+  6: { x: 817, y: 174 },
+};
+
+/* Tỉ lệ size theo chiều rộng mặt bậc (bậc 1 = chuẩn) */
+const STEP_SCALE = {
+  1: 1.000,
+  2: 0.922,
+  3: 0.808,
+  4: 0.711,
+  5: 0.610,
+  6: 0.525,
+};
+
+/* Size bậc 1 đã chỉnh tay (khớp ảnh chụp màn hình) */
+const BASE_SIZE_STEP1 = 0.28;
+
+/* Màu 6 quân */
+const COLORS = [
+  0xeab308, // 1 vàng (như ảnh chỉnh)
+  0xdc2626, // 2 đỏ
+  0x2563eb, // 3 xanh dương
+  0x16a34a, // 4 xanh lá
+  0x9333ea, // 5 tím
+  0x0891b2, // 6 cyan
+];
+
+const PLANE_H = 14.55;
+const PLANE_W = PLANE_H * (IMG_W / IMG_H);
+
+function pxToWorld(px, py) {
+  return {
+    x: (px / IMG_W - 0.5) * PLANE_W,
+    y: (0.5 - py / IMG_H) * PLANE_H,
+    z: 0,
+  };
+}
+
+const STEP_WORLD = {};
+for (let n = 1; n <= 6; n++) {
+  STEP_WORLD[n] = pxToWorld(STEP_PX[n].x, STEP_PX[n].y);
+}
+
+/* Trục xuyên tâm 1 → 6 (ẩn) */
+const AXIS_DIR = new THREE.Vector3(
+  STEP_WORLD[6].x - STEP_WORLD[1].x,
+  STEP_WORLD[6].y - STEP_WORLD[1].y,
+  0
+).normalize();
+
+const LOOK_AT = new THREE.Vector3(
+  (STEP_WORLD[3].x + STEP_WORLD[4].x) / 2,
+  (STEP_WORLD[3].y + STEP_WORLD[4].y) / 2,
+  0
+);
+
+/* Camera đã chỉnh tay: az=7.2  el=45.8  dist=32.95 */
+const CAM = { az: 7.2, el: 45.8, dist: 32.95 };
+
+/* ─── Renderer ─── */
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(0x000000, 0);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
+
+function setCameraSpherical(azDeg, elDeg, dist) {
+  const az = azDeg * Math.PI / 180;
+  const el = elDeg * Math.PI / 180;
+  camera.position.set(
+    LOOK_AT.x + dist * Math.cos(el) * Math.sin(az),
+    LOOK_AT.y - dist * Math.cos(el) * Math.cos(az),
+    LOOK_AT.z + dist * Math.sin(el)
+  );
+  camera.lookAt(LOOK_AT);
+}
+
+function layout() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  setCameraSpherical(CAM.az, CAM.el, CAM.dist);
+}
+layout();
+addEventListener('resize', layout);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+const key = new THREE.DirectionalLight(0xfff5ea, 2.0);
+key.position.set(4, 10, 12);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x38bdf8, 0.8);
+rim.position.set(-6, 6, 8);
+scene.add(rim);
+
+/* Holder: mũi theo AXIS_DIR, đứng hướng camera, tilt nhẹ */
+const TILT_DEG = 18;
+function makeHolder() {
+  const holder = new THREE.Group();
+  const tilt = TILT_DEG * Math.PI / 180;
+  const right = new THREE.Vector3(-AXIS_DIR.y, AXIS_DIR.x, 0).normalize();
+  const yAxis = new THREE.Vector3(0, 0, 1).applyAxisAngle(right, -tilt).normalize();
+  const xAxis = AXIS_DIR.clone();
+  const zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
+  yAxis.crossVectors(zAxis, xAxis).normalize();
+  holder.quaternion.setFromRotationMatrix(
+    new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis)
+  );
+  return holder;
+}
+
+/* ─── 6 quân ngựa — BASE cố định tại tâm từng bậc ─── */
+const horses = [];
+
+for (let n = 1; n <= 6; n++) {
+  const p = STEP_WORLD[n];
+  const holder = makeHolder();
+  holder.position.set(p.x, p.y, 0); // tâm đáy đế = tâm mặt bậc
+  scene.add(holder);
+
+  const size = BASE_SIZE_STEP1 * STEP_SCALE[n];
+  const horse = new Horse3D({
+    color: COLORS[n - 1],
+    material: 'plastic',
+    size,
+    shadows: true,
+  });
+  horse.setPosition(0, 0, 0);
+  horse.setHeading(0);
+  horse.addTo(holder);
+  horse.play('idle'); // thở nhẹ
+  horses.push(horse);
+}
+
+/* ─── Loop ─── */
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+  horses.forEach((h) => h.update(dt));
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
