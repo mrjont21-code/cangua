@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Cá ngựa — Lên chuồng (demo)</title>
+<style>
+html, body {
+  margin: 0; height: 100%; overflow: hidden;
+  background: #000;
+  font: 13px/1.4 system-ui, sans-serif; color: #e5e7eb;
+}
+#bg {
+  position: fixed; inset: 0;
+  background: #000 url('./bg.jpg') center center / contain no-repeat;
+  pointer-events: none;
+  z-index: 0;
+}
+canvas {
+  position: fixed; inset: 0;
+  display: block; width: 100%; height: 100%;
+  z-index: 1;
+}
+#ui {
+  position: fixed; top: 8px; left: 8px; width: 250px;
+  max-height: calc(100% - 16px); overflow: auto;
+  background: #121826e6; border: 1px solid #263041; border-radius: 8px;
+  padding: 8px 10px; z-index: 10;
+}
+summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
+.row { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+.row label { flex: 0 0 58px; color: #9ca3af; }
+.row input[type=range] { flex: 1; min-width: 0; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 4px 0 8px; }
+.grid.g2 { grid-template-columns: repeat(2, 1fr); }
+button, select {
+  background: #1d2638; color: #e5e7eb; border: 1px solid #2f3b52;
+  border-radius: 5px; padding: 6px 4px; font: inherit; cursor: pointer;
+}
+button:hover { background: #273349; }
+button.active { background: #1e40af; border-color: #3b82f6; }
+button:focus-visible, select:focus-visible, input:focus-visible {
+  outline: 2px solid #38bdf8; outline-offset: 1px;
+}
+h4 { margin: 8px 0 2px; font-size: 12px; color: #9ca3af; font-weight: 500; }
+#out { font: 11px/1.45 ui-monospace, monospace; color: #9ca3af; white-space: pre; margin-top: 6px; }
+#camOut {
+  font: 12px/1.5 ui-monospace, monospace;
+  color: #fbbf24;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 6px 0;
+  white-space: pre;
+}
+.note { font-size: 11px; color: #64748b; margin: 4px 0 0; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "./horse3d.js": "./horse3d.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="bg"></div>
+
+<details id="ui" open>
+  <summary>Lên chuồng — Demo</summary>
+
+  <h4>Góc camera (kéo xoay để chỉnh)</h4>
+  <div id="camOut">az=—  el=—  dist=—</div>
+  <div class="grid g2">
+    <button id="btnResetCam">Reset 30°/45°</button>
+    <button id="btnCopyCam">Copy góc</button>
+  </div>
+
+  <div class="row">
+    <label>Màu</label>
+    <input id="color" type="color" value="#dc2626">
+    <select id="mat" style="flex:1">
+      <option>plastic</option>
+      <option>wood</option>
+      <option>metal</option>
+      <option>gold</option>
+      <option>glass</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Size×</label>
+    <input id="size" type="range" min="0.5" max="1.5" step="0.02" value="1">
+  </div>
+  <div class="row">
+    <label>Tilt°</label>
+    <input id="tilt" type="range" min="0" max="40" step="1" value="18">
+  </div>
+  <h4>Vị trí bậc (1 → 6)</h4>
+  <div class="grid" id="steps"></div>
+  <h4>Hiển thị</h4>
+  <div class="grid g2">
+    <button id="btnAll">Hiện cả 6</button>
+    <button id="btnOne">Chỉ 1 quân</button>
+  </div>
+  <div class="row">
+    <input id="anch" type="checkbox">
+    <label for="anch" style="flex:1">Hiện điểm neo (đỏ=BASE)</label>
+  </div>
+  <div class="row">
+    <input id="markers" type="checkbox" checked>
+    <label for="markers" style="flex:1">Đánh dấu tâm bậc</label>
+  </div>
+  <div class="row">
+    <input id="showAxis" type="checkbox">
+    <label for="showAxis" style="flex:1">Hiện trục 1→6 (debug)</label>
+  </div>
+  <p class="note">
+    Kéo chuột / chạm để xoay camera. Góc az / el / dist hiện realtime.<br>
+    Reset = az 30° · nhìn xuống 45°.
+  </p>
+  <div id="out"></div>
+</details>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { Horse3D } from './horse3d.js';
+
+const IMG_W = 1081;
+const IMG_H = 1455;
+
+const STEP_PX = {
+  1: { x: 501, y: 1136 },
+  2: { x: 571, y: 888 },
+  3: { x: 641, y: 672 },
+  4: { x: 705, y: 488 },
+  5: { x: 771, y: 324 },
+  6: { x: 817, y: 174 },
+};
+
+const STEP_SCALE = {
+  1: 1.000, 2: 0.922, 3: 0.808,
+  4: 0.711, 5: 0.610, 6: 0.525,
+};
+
+const BASE_SIZE_STEP1 = 0.42 * 0.75; // 0.315
+
+const PLANE_H = 14.55;
+const PLANE_W = PLANE_H * (IMG_W / IMG_H);
+
+function pxToWorld(px, py) {
+  const nx = px / IMG_W;
+  const ny = py / IMG_H;
+  return {
+    x: (nx - 0.5) * PLANE_W,
+    y: (0.5 - ny) * PLANE_H,
+    z: 0,
+  };
+}
+
+const STEP_WORLD = {};
+for (let n = 1; n <= 6; n++) {
+  STEP_WORLD[n] = pxToWorld(STEP_PX[n].x, STEP_PX[n].y);
+}
+
+const AXIS_DIR = new THREE.Vector3(
+  STEP_WORLD[6].x - STEP_WORLD[1].x,
+  STEP_WORLD[6].y - STEP_WORLD[1].y,
+  0
+).normalize();
+
+/* Tâm khung nhìn = trung điểm bậc 3–4 */
+const LOOK_AT = new THREE.Vector3(
+  (STEP_WORLD[3].x + STEP_WORLD[4].x) / 2,
+  (STEP_WORLD[3].y + STEP_WORLD[4].y) / 2,
+  0
+);
+
+/* ─── Renderer ─── */
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(0x000000, 0);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.target.copy(LOOK_AT);
+controls.minDistance = 2;
+controls.maxDistance = 40;
+
+/**
+ * Đặt camera theo góc cầu:
+ *  az  = góc phương vị quanh trục đứng của plane (độ)
+ *        0 = nhìn từ +Z (thẳng vào mặt plane)
+ *        dương = xoay ngược kim đồng hồ nhìn từ trên
+ *  el  = góc nâng từ mặt phẳng (độ). 0 = ngang, 90 = thẳng đứng nhìn xuống
+ *  dist = khoảng cách tới target
+ */
+function setCameraSpherical(azDeg, elDeg, dist) {
+  const az = azDeg * Math.PI / 180;
+  const el = elDeg * Math.PI / 180;
+  // Plane là XY, "đứng" của plane là +Z (ra phía camera mặc định)
+  // Camera quanh target:
+  //   el=0  → nằm trên vòng tròn trong mặt phẳng song song XY? 
+  // Thực tế: coi +Z là "lên" tạm khi tính góc nhìn xuống plane.
+  // Vị trí: từ target, đi theo hướng:
+  //   x = dist * cos(el) * sin(az)
+  //   y = dist * cos(el) * cos(az)   // điều chỉnh để az=0 nhìn từ phía bậc 1
+  //   z = dist * sin(el)             // el=45 → cao hơn target, nhìn xuống
+  //
+  // Để "nhìn từ trên xuống" plane XY: camera có z > 0 và lookAt target.
+  const x = LOOK_AT.x + dist * Math.cos(el) * Math.sin(az);
+  const y = LOOK_AT.y - dist * Math.cos(el) * Math.cos(az);
+  const z = LOOK_AT.z + dist * Math.sin(el);
+  camera.position.set(x, y, z);
+  controls.target.copy(LOOK_AT);
+  controls.update();
+}
+
+/** Đọc góc cầu hiện tại từ vị trí camera */
+function readCameraSpherical() {
+  const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+  const dist = offset.length();
+  // el: góc từ mặt phẳng XY lên (asin z/dist)
+  const el = Math.asin(Math.max(-1, Math.min(1, offset.z / dist))) * 180 / Math.PI;
+  // az: atan2(x, -y) khớp với setCameraSpherical
+  const az = Math.atan2(offset.x, -offset.y) * 180 / Math.PI;
+  return { az, el, dist };
+}
+
+function applyDefaultCamera() {
+  // az 30°, nhìn xuống 45°, dist vừa khung
+  const vFov = camera.fov * Math.PI / 180;
+  const fitDist = (Math.max(PLANE_W, PLANE_H) * 0.55) / Math.tan(vFov / 2);
+  setCameraSpherical(30, 45, fitDist);
+}
+
+function layoutSize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+
+layoutSize();
+applyDefaultCamera();
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+const key = new THREE.DirectionalLight(0xfff5ea, 2.0);
+key.position.set(4, 10, 12);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x38bdf8, 0.8);
+rim.position.set(-6, 6, 8);
+scene.add(rim);
+
+/* Marker tâm bậc */
+const markerGroup = new THREE.Group();
+scene.add(markerGroup);
+
+function rebuildMarkers(on) {
+  while (markerGroup.children.length) {
+    const m = markerGroup.children.pop();
+    m.geometry?.dispose();
+    m.material?.dispose();
+  }
+  if (!on) return;
+  for (let n = 1; n <= 6; n++) {
+    const p = STEP_WORLD[n];
+    const s = new THREE.Mesh(
+      new THREE.SphereGeometry(0.09, 14, 10),
+      new THREE.MeshBasicMaterial({ color: 0x22c55e, depthTest: false })
+    );
+    s.position.set(p.x, p.y, 0.02);
+    s.renderOrder = 998;
+    markerGroup.add(s);
+
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#1e3a8a';
+    ctx.beginPath();
+    ctx.roundRect(6, 6, 52, 52, 12);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 30px system-ui,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(n), 32, 34);
+    const tex = new THREE.CanvasTexture(c);
+    const label = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.30, 0.30),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false })
+    );
+    label.position.set(p.x, p.y + 0.26, 0.03);
+    label.renderOrder = 999;
+    markerGroup.add(label);
+  }
+}
+rebuildMarkers(true);
+
+/* Trục 1→6 (debug) */
+const axisGroup = new THREE.Group();
+axisGroup.visible = false;
+scene.add(axisGroup);
+(function buildAxis() {
+  const pts = [];
+  for (let n = 1; n <= 6; n++) {
+    const p = STEP_WORLD[n];
+    pts.push(new THREE.Vector3(p.x, p.y, 0.01));
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xfbbf24, depthTest: false }));
+  line.renderOrder = 997;
+  axisGroup.add(line);
+  const tip = STEP_WORLD[6];
+  const arrow = new THREE.Mesh(
+    new THREE.ConeGeometry(0.12, 0.28, 8),
+    new THREE.MeshBasicMaterial({ color: 0xfbbf24, depthTest: false })
+  );
+  arrow.position.set(tip.x, tip.y, 0.02);
+  const ang = Math.atan2(AXIS_DIR.y, AXIS_DIR.x);
+  arrow.rotation.z = ang - Math.PI / 2;
+  arrow.renderOrder = 997;
+  axisGroup.add(arrow);
+})();
+
+/* Holder: mũi theo AXIS_DIR, đứng hướng camera + tilt */
+function makeHolder(tiltDeg) {
+  const holder = new THREE.Group();
+  const tilt = (tiltDeg || 0) * Math.PI / 180;
+  const right = new THREE.Vector3(-AXIS_DIR.y, AXIS_DIR.x, 0).normalize();
+  const yAxis = new THREE.Vector3(0, 0, 1).applyAxisAngle(right, -tilt).normalize();
+  const xAxis = AXIS_DIR.clone();
+  const zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
+  yAxis.crossVectors(zAxis, xAxis).normalize();
+  const m = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
+  holder.quaternion.setFromRotationMatrix(m);
+  return holder;
+}
+
+const entries = [];
+let mode = 'one';
+let activeStep = 1;
+const $ = (id) => document.getElementById(id);
+
+function sizeForStep(step) {
+  return BASE_SIZE_STEP1 * STEP_SCALE[step] * +$('size').value;
+}
+
+function clearAll() {
+  entries.forEach(({ holder, horse }) => {
+    horse.dispose();
+    holder.removeFromParent();
+  });
+  entries.length = 0;
+}
+
+function placeOne(step, color) {
+  const p = STEP_WORLD[step];
+  const holder = makeHolder(+$('tilt').value);
+  holder.position.set(p.x, p.y, 0);
+  scene.add(holder);
+
+  const horse = new Horse3D({
+    color: color ?? parseInt($('color').value.slice(1), 16),
+    material: $('mat').value,
+    size: sizeForStep(step),
+    shadows: true,
+  });
+  horse.setPosition(0, 0, 0);
+  horse.setHeading(0);
+  horse.addTo(holder);
+  entries.push({ holder, horse, step });
+  return horse;
+}
+
+function showOne(step) {
+  mode = 'one';
+  activeStep = step;
+  clearAll();
+  placeOne(step);
+  updateStepButtons();
+  updateOut();
+}
+
+function showAll() {
+  mode = 'all';
+  clearAll();
+  const palette = [0xdc2626, 0x2563eb, 0x16a34a, 0xca8a04, 0x9333ea, 0x0891b2];
+  for (let n = 1; n <= 6; n++) placeOne(n, palette[n - 1]);
+  updateStepButtons();
+  updateOut();
+}
+
+function reapplyAll() {
+  const saved = entries.map((e) => ({ step: e.step, color: e.horse.color }));
+  const wasMode = mode;
+  const wasStep = activeStep;
+  clearAll();
+  if (wasMode === 'all') {
+    saved.forEach((s) => placeOne(s.step, s.color));
+    mode = 'all';
+  } else {
+    placeOne(wasStep);
+    mode = 'one';
+    activeStep = wasStep;
+  }
+  updateStepButtons();
+  updateOut();
+}
+
+function updateStepButtons() {
+  document.querySelectorAll('#steps button').forEach((b) => {
+    b.classList.toggle('active', mode === 'one' && +b.dataset.step === activeStep);
+  });
+}
+
+for (let n = 1; n <= 6; n++) {
+  const b = document.createElement('button');
+  b.textContent = 'Bậc ' + n;
+  b.dataset.step = n;
+  b.onclick = () => showOne(n);
+  $('steps').appendChild(b);
+}
+
+$('btnAll').onclick = showAll;
+$('btnOne').onclick = () => showOne(activeStep || 1);
+$('btnResetCam').onclick = applyDefaultCamera;
+$('btnCopyCam').onclick = () => {
+  const { az, el, dist } = readCameraSpherical();
+  const text = `az=${az.toFixed(1)}  el=${el.toFixed(1)}  dist=${dist.toFixed(2)}`;
+  navigator.clipboard?.writeText(text).then(() => {
+    $('btnCopyCam').textContent = 'Đã copy!';
+    setTimeout(() => { $('btnCopyCam').textContent = 'Copy góc'; }, 1200);
+  }).catch(() => {
+    prompt('Góc camera:', text);
+  });
+};
+
+$('color').oninput = (e) => {
+  const hex = parseInt(e.target.value.slice(1), 16);
+  entries.forEach(({ horse }) => horse.setColor(hex));
+};
+$('mat').onchange = (e) => entries.forEach(({ horse }) => horse.setMaterial(e.target.value));
+$('size').oninput = reapplyAll;
+$('tilt').oninput = reapplyAll;
+$('anch').onchange = (e) => entries.forEach(({ horse }) => horse.showAnchors(e.target.checked));
+$('markers').onchange = (e) => rebuildMarkers(e.target.checked);
+$('showAxis').onchange = (e) => { axisGroup.visible = e.target.checked; };
+
+function updateOut() {
+  if (!entries.length) { $('out').textContent = ''; return; }
+  const lines = [
+    'Trục 1→6: dir=(' + AXIS_DIR.x.toFixed(2) + ', ' + AXIS_DIR.y.toFixed(2) + ')',
+    'Size bậc1 = ' + BASE_SIZE_STEP1.toFixed(3) + ' × slider',
+  ];
+  entries.forEach(({ horse, step }) => {
+    const b = horse.getBasePosition();
+    lines.push(
+      'Bậc ' + step + ': size=' + sizeForStep(step).toFixed(3) +
+      '  BASE(' + b.x.toFixed(2) + ',' + b.y.toFixed(2) + ',' + b.z.toFixed(2) + ')'
+    );
+  });
+  $('out').textContent = lines.join('\n');
+}
+
+function updateCamOut() {
+  const { az, el, dist } = readCameraSpherical();
+  const p = camera.position;
+  $('camOut').textContent =
+    'az  = ' + az.toFixed(1) + '°\n' +
+    'el  = ' + el.toFixed(1) + '°  (nhìn xuống)\n' +
+    'dist= ' + dist.toFixed(2) + '\n' +
+    'pos = (' + p.x.toFixed(2) + ', ' + p.y.toFixed(2) + ', ' + p.z.toFixed(2) + ')';
+}
+
+addEventListener('resize', () => {
+  layoutSize();
+});
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+  entries.forEach(({ horse }) => horse.update(dt));
+  controls.update();
+  updateCamOut();
+  renderer.render(scene, camera);
+});
+
+showOne(1);
+</script>
+</body>
+</html>
