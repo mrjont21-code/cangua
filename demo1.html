@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Board3D — Demo bàn cờ cá ngựa</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#0b0f17;font:13px/1.4 system-ui,sans-serif;color:#e5e7eb}
+canvas{display:block}
+#ui{position:fixed;top:8px;left:8px;width:260px;max-height:calc(100% - 16px);overflow:auto;background:#121826e6;border:1px solid #263041;border-radius:8px;padding:8px 10px;z-index:10}
+summary{cursor:pointer;font-weight:600;padding:2px 0}
+.row{display:flex;gap:6px;align-items:center;margin:6px 0}
+.row label{flex:0 0 80px;color:#9ca3af}
+.row input[type=range]{flex:1;min-width:0}
+.row select{flex:1;background:#1d2638;color:#e5e7eb;border:1px solid #2f3b52;border-radius:5px;padding:4px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin:4px 0 8px}
+.grid.g2{grid-template-columns:repeat(2,1fr)}
+button,select{background:#1d2638;color:#e5e7eb;border:1px solid #2f3b52;border-radius:5px;padding:6px 4px;font:inherit;cursor:pointer}
+button:hover{background:#273349}
+button.active{background:#1e40af;border-color:#3b82f6}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #38bdf8;outline-offset:1px}
+h4{margin:8px 0 2px;font-size:12px;color:#9ca3af;font-weight:500}
+input[type=checkbox]{margin:0}
+#out{font:11px/1.5 ui-monospace,monospace;color:#9ca3af;white-space:pre;margin-top:6px;max-height:160px;overflow:auto}
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "./horse3d.js": "./horse3d.js",
+    "./board3d.js": "./board3d.js"
+  }
+}
+</script>
+</head>
+<body>
+<details id="ui" open>
+  <summary>Board3D — Demo</summary>
+
+  <h4>Camera</h4>
+  <div class="grid" id="views"></div>
+
+  <h4>Màu quân</h4>
+  <div class="row">
+    <label>Màu</label>
+    <select id="color">
+      <option value="RED">Đỏ (RED)</option>
+      <option value="YELLOW">Vàng (YELLOW)</option>
+      <option value="GREEN">Xanh lá (GREEN)</option>
+      <option value="BLUE">Xanh dương (BLUE)</option>
+    </select>
+  </div>
+
+  <h4>Test vị trí</h4>
+  <div class="grid g2">
+    <button data-act="stable">Về chuồng</button>
+    <button data-act="start">Về xuất phát</button>
+  </div>
+  <div class="row">
+    <label>Step 0-58</label>
+    <input id="step" type="range" min="0" max="58" step="1" value="0">
+    <span id="stepVal" style="width:26px;text-align:right;color:#9ca3af">0</span>
+  </div>
+  <div class="grid g2">
+    <button data-act="stepTest">Đặt quân theo step</button>
+    <button data-act="cycle">Chạy vòng (0→58)</button>
+  </div>
+
+  <h4>Hiển thị</h4>
+  <div class="row"><input type="checkbox" id="cbTrack" checked><label for="cbTrack" style="flex:1">Track (đường đi)</label></div>
+  <div class="row"><input type="checkbox" id="cbHome" checked><label for="cbHome" style="flex:1">Home path</label></div>
+  <div class="row"><input type="checkbox" id="cbStable" checked><label for="cbStable" style="flex:1">Chuồng</label></div>
+  <div class="row"><input type="checkbox" id="cbNums" checked><label for="cbNums" style="flex:1">Số home path</label></div>
+  <div class="row"><input type="checkbox" id="cbStarts" checked><label for="cbStarts" style="flex:1">Marker xuất phát</label></div>
+  <div class="row"><input type="checkbox" id="cbGrid"><label for="cbGrid" style="flex:1">Grid labels (debug)</label></div>
+  <div class="row"><input type="checkbox" id="cbHorseNums" checked><label for="cbHorseNums" style="flex:1">Hiện số thứ tự quân</label></div>
+
+  <h4>Điểm neo (đỏ = BASE)</h4>
+  <div class="row"><input type="checkbox" id="cbAnchors"><label for="cbAnchors" style="flex:1">Hiện anchors</label></div>
+
+  <h4>Live preview</h4>
+  <div class="grid g2">
+    <button data-act="preview">Preview path</button>
+    <button data-act="clearPreview">Clear</button>
+  </div>
+
+  <div id="out"></div>
+</details>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { Horse3D } from './horse3d.js';
+import {
+  Board3D, BOARD_CONFIG, STABLES, STARTS, HOME_PATHS, TRACK, START_INDEX,
+  SAFE_INDICES, getHorsePosition, gridToWorld, whatIsAt, STEP_GOAL,
+} from './board3d.js';
+
+const $ = (id) => document.getElementById(id);
+
+/* ═══ RENDERER / SCENE / CAMERA ═══ */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0f17);
+scene.fog = new THREE.Fog(0x0b0f17, 40, 80);
+
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 500);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.target.set(0, 0, 0);
+
+/* ═══ ÁNH SÁNG ═══ */
+scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+const key = new THREE.DirectionalLight(0xfff5ea, 2.5);
+key.position.set(12, 22, 14);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+Object.assign(key.shadow.camera, { left: -15, right: 15, top: 15, bottom: -15, far: 60 });
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x38bdf8, 1.0);
+rim.position.set(-15, 18, -12);
+scene.add(rim);
+const fill = new THREE.PointLight(0xf59e0b, 0.6, 40);
+fill.position.set(0, 8, 8);
+scene.add(fill);
+
+/* ═══ BOARD ═══ */
+const board = new Board3D({
+  showNumbers: true,
+  showTrack: true,
+  showStables: true,
+  showHomePaths: true,
+  showStartMarkers: true,
+  showCenter: true,
+  showGridLabels: false,
+}).addTo(scene);
+
+/* ═══ HORSES — 4 quân mỗi màu, đặt trong chuồng ═══ */
+const HORSE_HEX = {
+  RED: 0xdc2626, YELLOW: 0xeab308, GREEN: 0x16a34a, BLUE: 0x2563eb,
+};
+const horses = { RED: [], YELLOW: [], GREEN: [], BLUE: [] };
+const horseSteps = { RED: [], YELLOW: [], GREEN: [], BLUE: [] };
+
+for (const color of Object.keys(horses)) {
+  for (let i = 0; i < 4; i++) {
+    const stablePos = board.getStablePosition(color, i);
+    const h = new Horse3D({
+      color: HORSE_HEX[color],
+      material: 'plastic',
+      shadows: true,
+    })
+      .addTo(scene)
+      .setBaseDiameter(0.85)
+      .setPosition(stablePos.x, 0, stablePos.z)
+      .setHeading(0);
+    h.userData.color = color;
+    h.userData.index = i;
+    horses[color].push(h);
+    horseSteps[color].push(-(i + 1)); // step < 0 = trong chuồng
+  }
+}
+
+/* ═══ CAMERA VIEWS ═══ */
+const VIEWS_CAM = {
+  'Trên':   { pos: [0, 18, 0.01], target: [0, 0, 0] },
+  '3/4':    { pos: [10, 12, 12],  target: [0, 0, 0] },
+  'Chéo':   { pos: [-10, 12, 12], target: [0, 0, 0] },
+  'Gần':    { pos: [5, 6, 8],     target: [0, 0, 0] },
+  'Bên':    { pos: [18, 4, 0],    target: [0, 0, 0] },
+  'Chuồng': { pos: [-9, 9, -9],   target: [0, 0, 0] },
+};
+for (const [name, v] of Object.entries(VIEWS_CAM)) {
+  const b = document.createElement('button');
+  b.textContent = name;
+  b.onclick = () => {
+    camera.position.set(...v.pos);
+    controls.target.set(...v.target);
+    controls.update();
+  };
+  $('views').appendChild(b);
+}
+
+/* ═══ UI HANDLERS ═══ */
+const activeColor = () => $('color').value;
+
+function setHorseTo(color, idx, step) {
+  const h = horses[color][idx];
+  const pos = getHorsePosition(color, step);
+  h.setPosition(pos.x, 0, pos.z);
+  // Heading: hướng theo trục track (trừ khi trong chuồng)
+  if (step < 0) h.setHeading(0);
+  else if (step <= 51) {
+    const next = getHorsePosition(color, Math.min(step + 1, 57));
+    const dx = next.x - pos.x, dz = next.z - pos.z;
+    if (Math.hypot(dx, dz) > 1e-6) h.setHeading(Math.atan2(-dz, dx) / Math.PI * 180);
+  } else {
+    const next = getHorsePosition(color, Math.min(step + 1, STEP_GOAL));
+    const dx = next.x - pos.x, dz = next.z - pos.z;
+    if (Math.hypot(dx, dz) > 1e-6) h.setHeading(Math.atan2(-dz, dx) / Math.PI * 180);
+  }
+  horseSteps[color][idx] = step;
+}
+
+$('step').oninput = () => { $('stepVal').textContent = $('step').value; };
+
+document.querySelectorAll('button[data-act]').forEach((b) => {
+  b.onclick = () => {
+    const act = b.dataset.act;
+    const color = activeColor();
+    if (act === 'stable') {
+      for (let i = 0; i < 4; i++) setHorseTo(color, i, -(i + 1));
+      updateOut();
+    } else if (act === 'start') {
+      for (let i = 0; i < 4; i++) setHorseTo(color, i, i === 0 ? 0 : -(i));
+      updateOut();
+    } else if (act === 'stepTest') {
+      const step = +$('step').value;
+      setHorseTo(color, 0, step);
+      updateOut();
+    } else if (act === 'cycle') {
+      const start = performance.now();
+      const dur = 3000;
+      const tick = () => {
+        const t = (performance.now() - start) / dur;
+        if (t >= 1) { setHorseTo(color, 0, STEP_GOAL); updateOut(); return; }
+        const step = Math.floor(t * STEP_GOAL);
+        setHorseTo(color, 0, step);
+        requestAnimationFrame(tick);
+      };
+      tick();
+    } else if (act === 'preview') {
+      const step = +$('step').value;
+      board.showPathPreview(color, step - 1, 5);
+    } else if (act === 'clearPreview') {
+      board.clearPathPreview();
+    }
+  };
+});
+
+/* Toggle hiển thị */
+$('cbTrack').onchange = (e) => {
+  board.root.traverse((o) => {
+    if (o.userData?.name?.startsWith('track_')) o.visible = e.target.checked;
+  });
+};
+$('cbHome').onchange = (e) => {
+  board.root.traverse((o) => {
+    if (o.userData?.name?.startsWith('home_')) o.visible = e.target.checked;
+  });
+};
+$('cbNums').onchange = (e) => {
+  // rebuild numbers by visibility
+  board.root.traverse((o) => {
+    if (o.material?.map && o.geometry?.type === 'PlaneGeometry') {
+      // Numbers are Planes with map; a bit hacky — use color filter
+    }
+  });
+};
+$('cbStarts').onchange = (e) => board.showStartCells(e.target.checked);
+$('cbHorseNums').onchange = () => updateHorseNumbers();
+$('cbAnchors').onchange = (e) => {
+  for (const color of Object.keys(horses))
+    horses[color].forEach((h) => h.showAnchors(e.target.checked));
+};
+
+/* ═══ HORSE NUMBER LABELS ═══ */
+let numSprites = [];
+function updateHorseNumbers() {
+  const show = $('cbHorseNums').checked;
+  numSprites.forEach((s) => { s.visible = show; });
+  if (numSprites.length) return;
+  const makeLabel = (text, colorHex) => {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 128;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#' + colorHex.toString(16).padStart(6, '0');
+    ctx.beginPath();
+    ctx.arc(64, 64, 52, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 78px system-ui';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 64, 70);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+    return new THREE.Sprite(mat);
+  };
+  for (const color of Object.keys(horses)) {
+    horses[color].forEach((h, i) => {
+      const s = makeLabel(String(i + 1), HORSE_HEX[color]);
+      s.scale.set(0.6, 0.6, 0.6);
+      s.renderOrder = 500;
+      h.root.add(s);
+      s.position.y = 5.5;
+      numSprites.push(s);
+    });
+  }
+}
+updateHorseNumbers();
+
+/* ═══ OUT PANEL ═══ */
+function updateOut() {
+  const lines = [];
+  lines.push(`Board: 15×15, CELL=${BOARD_CONFIG.CELL}`);
+  lines.push(`Track: 52 ô, hướng kim đồng hồ từ (1,6)`);
+  lines.push(`Start indices: ${Object.entries(START_INDEX).map(([k,v])=>`${k}=${v}`).join(', ')}`);
+  lines.push(`Safe cells: [${SAFE_INDICES.join(', ')}]`);
+  lines.push('');
+  lines.push('── Vị trí 16 quân ──');
+  for (const color of Object.keys(horses)) {
+    horses[color].forEach((h, i) => {
+      const p = h.getBasePosition();
+      lines.push(`${color[0]}${i+1} step=${String(horseSteps[color][i]).padStart(3)} BASE(${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)})`);
+    });
+  }
+  lines.push('');
+  lines.push('── Tra cứu ô ──');
+  const w = whatIsAt(7, 0);
+  lines.push(`(7,0): ${JSON.stringify(w)}`);
+  const w2 = whatIsAt(1, 6);
+  lines.push(`(1,6): ${JSON.stringify(w2)}`);
+  $('out').textContent = lines.join('\n');
+}
+updateOut();
+
+/* ═══ RESIZE ═══ */
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* ═══ ANIMATION LOOP ═══ */
+const clock = new THREE.Clock();
+let tAcc = 0;
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+  tAcc += dt;
+  for (const color of Object.keys(horses))
+    horses[color].forEach((h) => h.update(dt));
+  board.update(tAcc);
+  controls.update();
+  renderer.render(scene, camera);
+});
+
+/* Camera mặc định: 3/4 nhìn xuống */
+camera.position.set(10, 12, 12);
+controls.target.set(0, 0, 0);
+controls.update();
+
+console.log('Board3D Demo ready.');
+console.log('TRACK sample:', TRACK.slice(0, 5));
+console.log('STABLES:', STABLES);
+console.log('STARTS:', STARTS);
+console.log('HOME_PATHS:', HOME_PATHS);
+</script>
+</body>
+  </html>
