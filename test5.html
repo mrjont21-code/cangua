@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Cá ngựa — Lên chuồng</title>
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+#bg {
+  position: fixed; inset: 0;
+  background: #000 url('./bg.jpg') center center / contain no-repeat;
+  pointer-events: none; z-index: 0;
+}
+canvas {
+  position: fixed; inset: 0;
+  display: block; width: 100%; height: 100%;
+  z-index: 1;
+}
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "./horse3d.js": "./horse3d.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="bg"></div>
+<script type="module">
+import * as THREE from 'three';
+import { Horse3D } from './horse3d.js';
+
+/* ═══════════════════════════════════════════════════════════════
+   Ảnh gốc 1081×1455 — tâm mặt bậc (geometric center of gold tread)
+   Tinh chỉnh theo số + vùng cream của từng bậc
+   ═══════════════════════════════════════════════════════════════ */
+const IMG_W = 1081;
+const IMG_H = 1455;
+
+const STEP_PX = {
+  1: { x: 520, y: 1090 },
+  2: { x: 600, y: 840 },
+  3: { x: 670, y: 620 },
+  4: { x: 730, y: 440 },
+  5: { x: 780, y: 290 },
+  6: { x: 820, y: 160 },
+};
+
+/* Chiều rộng mặt bậc (px) → tỉ lệ size so với bậc 1 */
+const STEP_WIDTH_PX = { 1: 700, 2: 640, 3: 560, 4: 490, 5: 420, 6: 360 };
+const STEP_SCALE = {};
+for (let n = 1; n <= 6; n++) {
+  STEP_SCALE[n] = STEP_WIDTH_PX[n] / STEP_WIDTH_PX[1];
+}
+
+/* Size bậc 1 — vừa khít mặt bậc (~32% bề rộng) */
+const BASE_SIZE_STEP1 = 0.28;
+
+const COLORS = [
+  0xeab308, // 1 vàng
+  0xdc2626, // 2 đỏ
+  0x2563eb, // 3 xanh dương
+  0x16a34a, // 4 xanh lá
+  0x9333ea, // 5 tím
+  0x0891b2, // 6 cyan
+];
+
+/* Camera đã chỉnh tay */
+const CAM = { az: 7.2, el: 45.8, dist: 32.95 };
+
+/* ─── Renderer ─── */
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(0x000000, 0);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
+
+/* Target tạm — sẽ cập nhật sau khi có vị trí bậc */
+let lookAt = new THREE.Vector3(0, 0, 0);
+
+function setCameraSpherical(azDeg, elDeg, dist) {
+  const az = azDeg * Math.PI / 180;
+  const el = elDeg * Math.PI / 180;
+  camera.position.set(
+    lookAt.x + dist * Math.cos(el) * Math.sin(az),
+    lookAt.y - dist * Math.cos(el) * Math.cos(az),
+    lookAt.z + dist * Math.sin(el)
+  );
+  camera.lookAt(lookAt);
+  camera.updateMatrixWorld(true);
+}
+
+/* CSS object-fit: contain → hình chữ nhật ảnh trên viewport */
+function getContainRect(viewW, viewH) {
+  const imgAspect = IMG_W / IMG_H;
+  const viewAspect = viewW / viewH;
+  let drawW, drawH, offX, offY;
+  if (viewAspect > imgAspect) {
+    drawH = viewH;
+    drawW = viewH * imgAspect;
+    offX = (viewW - drawW) / 2;
+    offY = 0;
+  } else {
+    drawW = viewW;
+    drawH = viewW / imgAspect;
+    offX = 0;
+    offY = (viewH - drawH) / 2;
+  }
+  return { drawW, drawH, offX, offY };
+}
+
+/**
+ * Pixel ảnh → toạ độ thế giới trên mặt phẳng Z = 0
+ * bằng cách unproject qua camera hiện tại.
+ * → BASE luôn khớp tâm mặt bậc trên màn hình dù camera nghiêng.
+ */
+function imgPixelToWorld(px, py, viewW, viewH) {
+  const { drawW, drawH, offX, offY } = getContainRect(viewW, viewH);
+  // screen pixel
+  const sx = offX + (px / IMG_W) * drawW;
+  const sy = offY + (py / IMG_H) * drawH;
+  // NDC
+  const ndcX = (sx / viewW) * 2 - 1;
+  const ndcY = -(sy / viewH) * 2 + 1;
+
+  const near = new THREE.Vector3(ndcX, ndcY, -1).unproject(camera);
+  const far  = new THREE.Vector3(ndcX, ndcY,  1).unproject(camera);
+  const dir  = far.sub(near).normalize();
+
+  // Giao với plane Z = 0
+  // near.z + t * dir.z = 0  →  t = -near.z / dir.z
+  if (Math.abs(dir.z) < 1e-8) {
+    return { x: near.x, y: near.y, z: 0 };
+  }
+  const t = -near.z / dir.z;
+  return {
+    x: near.x + dir.x * t,
+    y: near.y + dir.y * t,
+    z: 0,
+  };
+}
+
+/* Trục 1→6 trên mặt phẳng (sau khi có world pos) */
+let AXIS_DIR = new THREE.Vector3(0, 1, 0);
+
+const TILT_DEG = 18;
+function makeHolder() {
+  const holder = new THREE.Group();
+  const tilt = TILT_DEG * Math.PI / 180;
+  const right = new THREE.Vector3(-AXIS_DIR.y, AXIS_DIR.x, 0).normalize();
+  const yAxis = new THREE.Vector3(0, 0, 1).applyAxisAngle(right, -tilt).normalize();
+  const xAxis = AXIS_DIR.clone();
+  const zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
+  yAxis.crossVectors(zAxis, xAxis).normalize();
+  holder.quaternion.setFromRotationMatrix(
+    new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis)
+  );
+  return holder;
+}
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+const key = new THREE.DirectionalLight(0xfff5ea, 2.0);
+key.position.set(4, 10, 12);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x38bdf8, 0.8);
+rim.position.set(-6, 6, 8);
+scene.add(rim);
+
+const horses = [];
+const holders = [];
+
+/**
+ * Xây dựng scene:
+ * 1. Đặt camera tạm
+ * 2. Unproject 6 tâm bậc → world
+ * 3. Cập nhật lookAt + AXIS_DIR + camera chính xác
+ * 4. Đặt 6 ngựa, lớp vẽ: bg → ngựa6 → … → ngựa1 (gần camera nhất)
+ */
+function build(viewW, viewH) {
+  // Xoá ngựa cũ
+  horses.forEach((h) => h.dispose());
+  holders.forEach((h) => h.removeFromParent());
+  horses.length = 0;
+  holders.length = 0;
+
+  // Camera tạm (lookAt gốc) để unproject
+  lookAt.set(0, 0, 0);
+  setCameraSpherical(CAM.az, CAM.el, CAM.dist);
+
+  // Unproject tâm bậc
+  const world = {};
+  for (let n = 1; n <= 6; n++) {
+    world[n] = imgPixelToWorld(STEP_PX[n].x, STEP_PX[n].y, viewW, viewH);
+  }
+
+  // lookAt = trung điểm bậc 3–4
+  lookAt.set(
+    (world[3].x + world[4].x) / 2,
+    (world[3].y + world[4].y) / 2,
+    0
+  );
+  setCameraSpherical(CAM.az, CAM.el, CAM.dist);
+
+  // Unproject lại với camera đã khóa lookAt (chính xác hơn)
+  for (let n = 1; n <= 6; n++) {
+    world[n] = imgPixelToWorld(STEP_PX[n].x, STEP_PX[n].y, viewW, viewH);
+  }
+
+  // Trục 1→6
+  AXIS_DIR.set(
+    world[6].x - world[1].x,
+    world[6].y - world[1].y,
+    0
+  ).normalize();
+
+  /* Lớp vẽ từ dưới lên: ngựa 6 (xa) → ngựa 1 (gần)
+     Offset Z nhỏ về phía camera cho bậc thấp hơn + renderOrder */
+  for (let n = 6; n >= 1; n--) {
+    const p = world[n];
+    const holder = makeHolder();
+    // z offset: bậc 1 gần camera nhất
+    const zOff = (7 - n) * 0.04;
+    holder.position.set(p.x, p.y, zOff);
+    holder.renderOrder = n; // 1 trên cùng khi transparent
+    scene.add(holder);
+    holders.push(holder);
+
+    const size = BASE_SIZE_STEP1 * STEP_SCALE[n];
+    const horse = new Horse3D({
+      color: COLORS[n - 1],
+      material: 'plastic',
+      size,
+      shadows: true,
+    });
+    horse.setPosition(0, 0, 0);
+    horse.setHeading(0);
+    horse.addTo(holder);
+    // Đảm bảo mesh render đúng thứ tự
+    horse.root.traverse((obj) => {
+      if (obj.isMesh) {
+        obj.renderOrder = n;
+        if (obj.material) {
+          obj.material.depthWrite = true;
+        }
+      }
+    });
+    horse.play('idle');
+    horses.push(horse);
+  }
+}
+
+function layout() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  build(w, h);
+}
+
+layout();
+addEventListener('resize', layout);
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+  horses.forEach((h) => h.update(dt));
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
