@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Cá ngựa — Lên chuồng (demo)</title>
+<style>
+html, body {
+  margin: 0; height: 100%; overflow: hidden;
+  background: #000;
+  font: 13px/1.4 system-ui, sans-serif; color: #e5e7eb;
+}
+/* Hình nền CỐ ĐỊNH — không tương tác */
+#bg {
+  position: fixed; inset: 0;
+  background: #000 url('./bg.jpg') center center / contain no-repeat;
+  pointer-events: none;
+  z-index: 0;
+}
+canvas {
+  position: fixed; inset: 0;
+  display: block; width: 100%; height: 100%;
+  z-index: 1;
+  /* canvas trong suốt để thấy bg cố định phía sau */
+}
+#ui {
+  position: fixed; top: 8px; left: 8px; width: 230px;
+  max-height: calc(100% - 16px); overflow: auto;
+  background: #121826e6; border: 1px solid #263041; border-radius: 8px;
+  padding: 8px 10px; z-index: 10;
+}
+summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
+.row { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+.row label { flex: 0 0 58px; color: #9ca3af; }
+.row input[type=range] { flex: 1; min-width: 0; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 4px 0 8px; }
+.grid.g2 { grid-template-columns: repeat(2, 1fr); }
+button, select {
+  background: #1d2638; color: #e5e7eb; border: 1px solid #2f3b52;
+  border-radius: 5px; padding: 6px 4px; font: inherit; cursor: pointer;
+}
+button:hover { background: #273349; }
+button.active { background: #1e40af; border-color: #3b82f6; }
+button:focus-visible, select:focus-visible, input:focus-visible {
+  outline: 2px solid #38bdf8; outline-offset: 1px;
+}
+h4 { margin: 8px 0 2px; font-size: 12px; color: #9ca3af; font-weight: 500; }
+#out { font: 11px/1.45 ui-monospace, monospace; color: #9ca3af; white-space: pre; margin-top: 6px; }
+.note { font-size: 11px; color: #64748b; margin: 4px 0 0; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "./horse3d.js": "./horse3d.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="bg"></div>
+
+<details id="ui" open>
+  <summary>Lên chuồng — Demo</summary>
+  <div class="row">
+    <label>Màu</label>
+    <input id="color" type="color" value="#dc2626">
+    <select id="mat" style="flex:1">
+      <option>plastic</option>
+      <option>wood</option>
+      <option>metal</option>
+      <option>gold</option>
+      <option>glass</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Size</label>
+    <input id="size" type="range" min="0.15" max="0.9" step="0.02" value="0.42">
+  </div>
+  <div class="row">
+    <label>Heading</label>
+    <input id="head" type="range" min="-180" max="180" step="1" value="0">
+  </div>
+  <h4>Vị trí bậc (1 → 6)</h4>
+  <div class="grid" id="steps"></div>
+  <h4>Hiển thị</h4>
+  <div class="grid g2">
+    <button id="btnAll">Hiện cả 6</button>
+    <button id="btnOne">Chỉ 1 quân</button>
+  </div>
+  <div class="row">
+    <input id="anch" type="checkbox">
+    <label for="anch" style="flex:1">Hiện điểm neo (đỏ=BASE)</label>
+  </div>
+  <div class="row">
+    <input id="markers" type="checkbox" checked>
+    <label for="markers" style="flex:1">Đánh dấu tâm bậc</label>
+  </div>
+  <p class="note">
+    Nền cố định (không xoay). Quân đứng thẳng theo trục đứng (Y-up).<br>
+    BASE = tâm mặt bậc. Hướng mặc định theo trục 1→6.
+  </p>
+  <div id="out"></div>
+</details>
+
+<script type="module">
+import * as THREE from 'three';
+import { Horse3D } from './horse3d.js';
+
+/* ═══════════════════════════════════════════════════════════════
+   NỀN CỐ ĐỊNH
+   bg.jpg = ảnh gốc portrait 1081×1455 (giữ nguyên tỉ lệ).
+   CSS background contain → letterbox đen nếu viewport khác tỉ lệ.
+   Canvas trong suốt, camera CỐ ĐỊNH khớp khung hình ảnh.
+   ═══════════════════════════════════════════════════════════════ */
+
+const IMG_W = 1081;
+const IMG_H = 1455;
+
+/* Tâm mặt bậc — centroid vùng cream trên ảnh gốc (pixel) */
+const STEP_PX = {
+  1: { x: 501, y: 1136 },
+  2: { x: 571, y: 888 },
+  3: { x: 641, y: 672 },
+  4: { x: 705, y: 488 },
+  5: { x: 771, y: 324 },
+  6: { x: 817, y: 174 },
+};
+
+/* ─── World mapping ───
+   Plane song song màn hình, camera nhìn -Z.
+   Toạ độ world khớp pixel ảnh khi background = contain.
+   Ta tính scale + offset giống CSS object-fit: contain.
+*/
+const PLANE_H = 14.55;          // world height ≈ IMG_H / 100
+const PLANE_W = PLANE_H * (IMG_W / IMG_H); // giữ đúng aspect ảnh
+
+function getContainLayout(viewW, viewH) {
+  const imgAspect = IMG_W / IMG_H;
+  const viewAspect = viewW / viewH;
+  let drawW, drawH, offX, offY;
+  if (viewAspect > imgAspect) {
+    // viewport rộng hơn → letterbox trái/phải
+    drawH = viewH;
+    drawW = viewH * imgAspect;
+    offX = (viewW - drawW) / 2;
+    offY = 0;
+  } else {
+    // viewport cao hơn → letterbox trên/dưới
+    drawW = viewW;
+    drawH = viewW / imgAspect;
+    offX = 0;
+    offY = (viewH - drawH) / 2;
+  }
+  return { drawW, drawH, offX, offY };
+}
+
+/** Pixel ảnh → world (trên plane Z=0, Y-up, X-right) */
+function pxToWorld(px, py) {
+  // Chuẩn hoá trong ảnh: (0,0) góc trên-trái → world
+  const nx = px / IMG_W;          // 0..1 trái→phải
+  const ny = py / IMG_H;          // 0..1 trên→dưới
+  const x = (nx - 0.5) * PLANE_W;
+  const y = (0.5 - ny) * PLANE_H; // đảo Y: trên ảnh = +Y world
+  return { x, y, z: 0 };
+}
+
+const STEP_WORLD = {};
+for (let n = 1; n <= 6; n++) {
+  STEP_WORLD[n] = pxToWorld(STEP_PX[n].x, STEP_PX[n].y);
+}
+
+/* Hướng trục 1→6 trên mặt phẳng (chủ yếu đi lên = +Y) */
+const dir = new THREE.Vector3(
+  STEP_WORLD[6].x - STEP_WORLD[1].x,
+  STEP_WORLD[6].y - STEP_WORLD[1].y,
+  0
+).normalize();
+// Horse3D heading: 0 = mũi hướng +X, tăng = ngược kim đồng hồ quanh Y
+// Vì quân đứng thẳng (trục đứng = Y), ta chỉ xoay quanh Y.
+// Hướng "lên chuồng" trên ảnh gần như thẳng đứng → heading ≈ 90° (NORTH) hoặc tính từ vector chiếu xuống XZ.
+// Vì plane song song màn hình và chuyển động chủ yếu theo Y, 
+// ta lấy góc của hình chiếu lên XZ (ở đây Z≈0 nên gần như theo X).
+const STAIR_HEADING_DEG = Math.atan2(0, dir.x) * (180 / Math.PI); // gần 0 hoặc 180 tuỳ dấu
+// Thực tế dir.x > 0 và dir.y > 0 → ngựa quay mặt hơi sang phải + lên.
+// Để mũi hướng theo hướng đi lên bậc, dùng:
+const STAIR_HEADING = Math.atan2(-0, dir.x) * (180 / Math.PI); // đơn giản theo +X component
+// Chính xác hơn: vì chuyển động chính là +Y (đứng), heading chỉ quyết định mặt nghiêng trái/phải.
+// Ta chọn heading sao cho mặt ngựa hướng về phía "trên" của ảnh khi nhìn.
+// Trong ảnh cầu thang nghiêng nhẹ sang phải khi lên → heading ≈ 15–25° có thể đẹp.
+// Mặc định tính từ delta X của các bậc:
+const avgDx = STEP_WORLD[6].x - STEP_WORLD[1].x;
+const HEADING0 = avgDx >= 0 ? 0 : 180; // mũi hướng theo phía bậc cao nghiêng
+
+/* ─── Renderer trong suốt ─── */
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(0x000000, 0); // trong suốt hoàn toàn
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+// không set background → giữ alpha
+
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+// Camera cố định, nhìn thẳng vào plane (khớp ảnh)
+function layoutCamera() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+
+  // Đặt camera sao cho plane PLANE_W x PLANE_H lấp đúng vùng contain của ảnh
+  const { drawW, drawH } = getContainLayout(w, h);
+  // Khoảng cách camera để chiều cao plane khớp drawH
+  const vFov = camera.fov * Math.PI / 180;
+  const dist = (PLANE_H / 2) / Math.tan(vFov / 2);
+  // Nếu viewport letterbox ngang, plane vẫn full height ảnh → ok
+  // Nếu letterbox dọc, cần fit theo chiều rộng
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+  const distW = (PLANE_W / 2) / Math.tan(hFov / 2);
+  const useDist = Math.max(dist, distW) * 1.0;
+
+  camera.position.set(0, 0, useDist);
+  camera.lookAt(0, 0, 0);
+}
+layoutCamera();
+
+/* Ánh sáng cố định */
+scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+const key = new THREE.DirectionalLight(0xfff5ea, 2.0);
+key.position.set(4, 10, 12);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x38bdf8, 0.8);
+rim.position.set(-6, 6, 8);
+scene.add(rim);
+
+/* Marker tâm bậc (debug) — nằm trên plane */
+const markerGroup = new THREE.Group();
+scene.add(markerGroup);
+
+function rebuildMarkers(on) {
+  while (markerGroup.children.length) {
+    const m = markerGroup.children.pop();
+    m.geometry?.dispose();
+    m.material?.dispose();
+  }
+  if (!on) return;
+  for (let n = 1; n <= 6; n++) {
+    const p = STEP_WORLD[n];
+    const s = new THREE.Mesh(
+      new THREE.SphereGeometry(0.10, 14, 10),
+      new THREE.MeshBasicMaterial({ color: 0x22c55e, depthTest: false })
+    );
+    s.position.set(p.x, p.y, 0.02);
+    s.renderOrder = 998;
+    markerGroup.add(s);
+
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#1e3a8a';
+    ctx.beginPath();
+    ctx.roundRect(6, 6, 52, 52, 12);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 30px system-ui,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(n), 32, 34);
+    const tex = new THREE.CanvasTexture(c);
+    const label = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.32, 0.32),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false })
+    );
+    label.position.set(p.x, p.y + 0.28, 0.03);
+    label.renderOrder = 999;
+    markerGroup.add(label);
+  }
+}
+rebuildMarkers(true);
+
+/* ─── Quân ngựa — đứng thẳng theo trục đứng (Y-up) ─── */
+const horses = [];
+let mode = 'one';
+let activeStep = 1;
+
+const $ = (id) => document.getElementById(id);
+
+function makeHorse(color) {
+  const h = new Horse3D({
+    color,
+    material: $('mat').value,
+    size: +$('size').value,
+    shadows: true,
+  });
+  h.addTo(scene);
+  return h;
+}
+
+function placeHorse(h, step) {
+  const p = STEP_WORLD[step];
+  // BASE đặt đúng tâm mặt bậc. Quân đứng thẳng (root.y = 0 local → BASE trên plane).
+  h.setPosition(p.x, p.y, 0);
+  // Heading: xoay quanh trục đứng (Y). Offset từ slider.
+  const extra = +$('head').value;
+  h.setHeading(HEADING0 + extra);
+  return h;
+}
+
+function clearHorses() {
+  horses.forEach((h) => h.dispose());
+  horses.length = 0;
+}
+
+function showOne(step) {
+  mode = 'one';
+  activeStep = step;
+  clearHorses();
+  const h = makeHorse(parseInt($('color').value.slice(1), 16));
+  placeHorse(h, step);
+  horses.push(h);
+  updateStepButtons();
+  updateOut();
+}
+
+function showAll() {
+  mode = 'all';
+  clearHorses();
+  const palette = [0xdc2626, 0x2563eb, 0x16a34a, 0xca8a04, 0x9333ea, 0x0891b2];
+  for (let n = 1; n <= 6; n++) {
+    const h = makeHorse(palette[n - 1]);
+    placeHorse(h, n);
+    horses.push(h);
+  }
+  updateStepButtons();
+  updateOut();
+}
+
+function updateStepButtons() {
+  document.querySelectorAll('#steps button').forEach((b) => {
+    b.classList.toggle('active', mode === 'one' && +b.dataset.step === activeStep);
+  });
+}
+
+for (let n = 1; n <= 6; n++) {
+  const b = document.createElement('button');
+  b.textContent = `Bậc ${n}`;
+  b.dataset.step = n;
+  b.onclick = () => showOne(n);
+  $('steps').appendChild(b);
+}
+
+$('btnAll').onclick = showAll;
+$('btnOne').onclick = () => showOne(activeStep || 1);
+
+$('color').oninput = (e) => {
+  const hex = parseInt(e.target.value.slice(1), 16);
+  horses.forEach((h) => h.setColor(hex));
+};
+$('mat').onchange = (e) => horses.forEach((h) => h.setMaterial(e.target.value));
+$('size').oninput = (e) => {
+  const s = +e.target.value;
+  horses.forEach((h) => h.setSize(s));
+};
+$('head').oninput = () => {
+  horses.forEach((h, i) => {
+    const step = mode === 'all' ? i + 1 : activeStep;
+    placeHorse(h, step);
+  });
+};
+$('anch').onchange = (e) => horses.forEach((h) => h.showAnchors(e.target.checked));
+$('markers').onchange = (e) => rebuildMarkers(e.target.checked);
+
+function updateOut() {
+  if (!horses.length) { $('out').textContent = ''; return; }
+  const lines = [`Heading gốc (trục đứng): ${HEADING0}°`];
+  horses.forEach((h, i) => {
+    const step = mode === 'all' ? i + 1 : activeStep;
+    const b = h.getBasePosition();
+    lines.push(`Bậc ${step}: BASE (${b.x.toFixed(2)}, ${b.y.toFixed(2)}, ${b.z.toFixed(2)})  h=${h.headingDeg.toFixed(0)}°`);
+  });
+  $('out').textContent = lines.join('\n');
+}
+
+addEventListener('resize', () => {
+  layoutCamera();
+});
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+  horses.forEach((h) => h.update(dt));
+  renderer.render(scene, camera);
+});
+
+/* Khởi tạo */
+showOne(1);
+console.table(STEP_WORLD);
+console.log('HEADING0 =', HEADING0);
+</script>
+</body>
+</html>
