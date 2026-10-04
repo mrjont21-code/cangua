@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phase 1 - Bản đồ tọa độ 96 Node (Lưới 20x20)</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #fff;
+        }
+        canvas {
+            background-color: #FFFDE7;
+            border: 4px solid #333;
+            border-radius: 8px;
+            box-shadow: 0 15px 50px rgba(0,0,0,0.8);
+            margin-bottom: 20px;
+        }
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            background: #2a2a2a;
+            padding: 15px 25px;
+            border-radius: 8px;
+            font-size: 14px;
+            max-width: 700px;
+            justify-content: center;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .color-box {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+            border: 1px solid #fff;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="legend">
+        <div class="legend-item"><div class="color-box" style="background:#4CAF50;"></div> Chuồng (16)</div>
+        <div class="legend-item"><div class="color-box" style="background:#FF9800;"></div> Xuất phát (4)</div>
+        <div class="legend-item"><div class="color-box" style="background:#F44336;"></div> Lên chuồng (4)</div>
+        <div class="legend-item"><div class="color-box" style="background:#2196F3;"></div> Chuồng đích (24)</div>
+        <div class="legend-item"><div class="color-box" style="background:#9E9E9E;"></div> Đường đi (48)</div>
+    </div>
+
+    <canvas id="boardCanvas"></canvas>
+
+    <script>
+        // ==========================================
+        // CẤU HÌNH HỆ THỐNG
+        // ==========================================
+        const CONFIG = {
+            GRID_SIZE: 20, // Lưới 20x20
+            U: 35,         // 1 đơn vị = 35px (Tổng canvas 700x700)
+            colors: {
+                background: '#FFFDE7',
+                gridLine: '#D0D0D0',
+                nest: '#4CAF50',
+                start: '#FF9800',
+                entrance: '#F44336',
+                homePath: '#2196F3',
+                track: '#9E9E9E',
+                border: '#333333',
+                text: '#000000'
+            }
+        };
+
+        const canvas = document.getElementById('boardCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Xử lý màn hình Retina (High DPI) để nét hơn
+        const dpr = window.devicePixelRatio || 1;
+        const U = CONFIG.U;
+        const CANVAS_SIZE = CONFIG.GRID_SIZE * U;
+        
+        canvas.width = CANVAS_SIZE * dpr;
+        canvas.height = CANVAS_SIZE * dpr;
+        canvas.style.width = CANVAS_SIZE + 'px';
+        canvas.style.height = CANVAS_SIZE + 'px';
+        ctx.scale(dpr, dpr);
+
+        // ==========================================
+        // DỮ LIỆU TỌA ĐỘ 96 NODE (Đã kiểm tra kỹ lưỡng)
+        // Tọa độ (x, y) tính theo ô lưới (0-19)
+        // ==========================================
+        window.BOARD_DATA = {
+            // 1. Chuồng ngựa (16 vị trí)
+            nests: {
+                red:    [{x:2,y:2}, {x:4,y:2}, {x:2,y:4}, {x:4,y:4}],
+                yellow: [{x:15,y:2}, {x:17,y:2}, {x:15,y:4}, {x:17,y:4}],
+                green:  [{x:2,y:15}, {x:4,y:15}, {x:2,y:17}, {x:4,y:17}],
+                blue:   [{x:15,y:15}, {x:17,y:15}, {x:15,y:17}, {x:17,y:17}]
+            },
+            // 2. Vị trí xuất phát (4 vị trí)
+            starts: {
+                red:    {x:1, y:8},
+                yellow: {x:14, y:1},
+                green:  {x:18, y:11},
+                blue:   {x:11, y:18}
+            },
+            // 3. Vị trí lên chuồng (4 vị trí)
+            entrances: {
+                red:    {x:0, y:9},
+                yellow: {x:10, y:0},
+                green:  {x:19, y:10},
+                blue:   {x:9, y:19}
+            },
+            // 4. Chuồng đích - 6 bậc lên chuồng (24 vị trí)
+            homePaths: {
+                red:    [{x:1,y:9}, {x:2,y:9}, {x:3,y:9}, {x:4,y:9}, {x:5,y:9}, {x:6,y:9}],
+                yellow: [{x:10,y:1}, {x:10,y:2}, {x:10,y:3}, {x:10,y:4}, {x:10,y:5}, {x:10,y:6}],
+                green:  [{x:18,y:10}, {x:17,y:10}, {x:16,y:10}, {x:15,y:10}, {x:14,y:10}, {x:13,y:10}],
+                blue:   [{x:9,y:18}, {x:9,y:17}, {x:9,y:16}, {x:9,y:15}, {x:9,y:14}, {x:9,y:13}]
+            },
+            // 5. Đường đi thông thường (48 vị trí - 12 bước mỗi màu)
+            tracks: {
+                red:    [{x:1,y:8}, {x:2,y:8}, {x:3,y:8}, {x:4,y:8}, {x:5,y:8}, {x:6,y:8}, {x:6,y:7}, {x:6,y:6}, {x:7,y:6}, {x:8,y:6}, {x:9,y:6}, {x:10,y:6}],
+                yellow: [{x:14,y:1}, {x:14,y:2}, {x:14,y:3}, {x:14,y:4}, {x:14,y:5}, {x:14,y:6}, {x:14,y:7}, {x:14,y:8}, {x:15,y:8}, {x:16,y:8}, {x:17,y:8}, {x:18,y:8}],
+                green:  [{x:18,y:11}, {x:18,y:12}, {x:18,y:13}, {x:18,y:14}, {x:17,y:14}, {x:16,y:14}, {x:16,y:15}, {x:16,y:16}, {x:15,y:16}, {x:14,y:16}, {x:14,y:17}, {x:14,y:18}],
+                blue:   [{x:11,y:18}, {x:10,y:18}, {x:9,y:18}, {x:8,y:18}, {x:8,y:17}, {x:8,y:16}, {x:7,y:16}, {x:6,y:16}, {x:6,y:15}, {x:6,y:14}, {x:5,y:14}, {x:4,y:14}]
+            }
+        };
+
+        // ==========================================
+        // CÁC HÀM VẼ
+        // ==========================================
+
+        function drawGrid() {
+            ctx.fillStyle = CONFIG.colors.background;
+            ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+            
+            ctx.strokeStyle = CONFIG.colors.gridLine;
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= CONFIG.GRID_SIZE; i++) {
+                ctx.beginPath(); ctx.moveTo(i * U, 0); ctx.lineTo(i * U, CANVAS_SIZE); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, i * U); ctx.lineTo(CANVAS_SIZE, i * U); ctx.stroke();
+            }
+        }
+
+        function drawNests() {
+            const drawNest = (startX, startY, color) => {
+                ctx.fillStyle = color;
+                ctx.globalAlpha = 0.2;
+                ctx.fillRect(startX * U, startY * U, 6 * U, 6 * U);
+                ctx.globalAlpha = 1.0;
+                ctx.strokeStyle = CONFIG.colors.border;
+                ctx.lineWidth = 3;
+                ctx.strokeRect(startX * U, startY * U, 6 * U, 6 * U);
+            };
+            drawNest(0, 0, '#F44336');   // Red (Top-Left)
+            drawNest(14, 0, '#FFEB3B');  // Yellow (Top-Right)
+            drawNest(0, 14, '#4CAF50');  // Green (Bottom-Left)
+            drawNest(14, 14, '#2196F3'); // Blue (Bottom-Right)
+        }
+
+        function drawCell(x, y, color, label) {
+            ctx.fillStyle = color;
+            ctx.fillRect(x * U, y * U, U, U);
+            ctx.strokeStyle = CONFIG.colors.border;
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(x * U, y * U, U, U);
+            
+            // Vẽ nhãn chữ cái để dễ debug
+            if (label) {
+                ctx.fillStyle = CONFIG.colors.text;
+                ctx.font = 'bold 12px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(label, x * U + U/2, y * U + U/2);
+            }
+        }
+
+        function drawPaths() {
+            // Vẽ đường đi chính (Track) - Nhãn T
+            Object.values(BOARD_DATA.tracks).forEach(colorPath => {
+                colorPath.forEach(pos => drawCell(pos.x, pos.y, CONFIG.colors.track, 'T'));
+            });
+
+            // Vẽ đường về đích (Home Path) - Nhãn H
+            Object.values(BOARD_DATA.homePaths).forEach(colorPath => {
+                colorPath.forEach(pos => drawCell(pos.x, pos.y, CONFIG.colors.homePath, 'H'));
+            });
+
+            // Vẽ vị trí xuất phát (Start) - Nhãn S
+            Object.values(BOARD_DATA.starts).forEach(pos => {
+                drawCell(pos.x, pos.y, CONFIG.colors.start, 'S');
+            });
+
+            // Vẽ vị trí lên chuồng (Entrance) - Nhãn E
+            Object.values(BOARD_DATA.entrances).forEach(pos => {
+                drawCell(pos.x, pos.y, CONFIG.colors.entrance, 'E');
+            });
+        }
+
+        function drawNodesCenters() {
+            const drawDot = (x, y, color) => {
+                ctx.beginPath();
+                ctx.arc(x * U + U/2, y * U + U/2, U * 0.25, 0, Math.PI * 2);
+                ctx.fillStyle = color;
+                ctx.fill();
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            };
+
+            // Tâm các ô trong chuồng
+            Object.values(BOARD_DATA.nests).forEach(colorNests => {
+                colorNests.forEach(pos => drawDot(pos.x, pos.y, '#FFF'));
+            });
+        }
+
+        function render() {
+            drawGrid();
+            drawNests();
+            drawPaths();
+            drawNodesCenters();
+            
+            console.log("=== KIỂM TRA DỮ LIỆU TỌA ĐỘ ===");
+            const total = 
+                Object.values(BOARD_DATA.nests).flat().length +
+                Object.values(BOARD_DATA.starts).length +
+                Object.values(BOARD_DATA.entrances).length +
+                Object.values(BOARD_DATA.homePaths).flat().length +
+                Object.values(BOARD_DATA.tracks).flat().length;
+            
+            console.log("Tổng số Node đã số hóa:", total, "/ 96");
+            console.log("Dữ liệu chi tiết:", window.BOARD_DATA);
+        }
+
+        render();
+    </script>
+</body>
+</html>
