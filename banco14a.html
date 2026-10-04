@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phase 1 - Vẽ 1/4 Bàn Cờ Cá Ngựa</title>
+    <style>
+        body {
+            background-color: #2c3e50;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+            color: white;
+        }
+        canvas {
+            background-color: #FFFDE7; /* Màu nền vàng nhạt giống hình mẫu */
+            border: 2px solid #333;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            /* Kích thước canvas sẽ được set động bằng JS */
+        }
+        .info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="info">
+        <b>Phase 1: 1/4 Bàn Cờ (Góc Xanh Lá)</b><br>
+        - 1 Đơn vị (U) = 40px<br>
+        - Ô vuông = 2U x 2U<br>
+        - Chấm tròn = 1U (Cách lề 0.5U)
+    </div>
+
+    <canvas id="ludoCanvas"></canvas>
+
+    <script>
+        // ==========================================
+        // CẤU HÌNH HỆ THỐNG (Dễ dàng thay đổi khi lên 3D)
+        // ==========================================
+        const CONFIG = {
+            U: 40, // 1 đơn vị = 40 pixels
+            cellSize: 2, // 1 ô vuông = 2 đơn vị
+            colors: {
+                background: '#FFFDE7',
+                track: '#FFFFFF',
+                border: '#333333',
+                nestGreen: '#A5D6A7', // Màu chuồng
+                homePath: '#66BB6A',  // Màu đường về đích
+                startSquare: '#4CAF50', // Màu ô xuất quân
+                piece: '#2E7D32',     // Màu quân cờ
+                safety: '#4CAF50'
+            }
+        };
+
+        // Khởi tạo Canvas
+        const canvas = document.getElementById('ludoCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Kích thước 1/4 bàn cờ (giả sử bàn cờ full là 15x15 đơn vị, 1/4 là ~8x8 ô vuông)
+        // Ở đây ta dùng lưới 8x8 ô vuông (mỗi ô 2U) => 16U x 16U
+        const GRID_SIZE = 8; 
+        const CANVAS_SIZE = GRID_SIZE * CONFIG.cellSize * CONFIG.U; // 8 * 2 * 40 = 640px
+        
+        canvas.width = CANVAS_SIZE;
+        canvas.height = CANVAS_SIZE;
+
+        // ==========================================
+        // LƯU TRỮ TỌA ĐỘ CÁC NODE (Dùng cho Phase 2 - 3D)
+        // ==========================================
+        const nodes = {
+            startSquare: null,
+            mainTrack: [],
+            homePath: [],
+            nestCircles: []
+        };
+
+        // ==========================================
+        // CÁC HÀM TIỆN ÍCH VẼ HÌNH
+        // ==========================================
+        
+        // Vẽ hình vuông (ô cờ)
+        function drawRect(x, y, w, h, fillColor, strokeColor = CONFIG.colors.border, lineWidth = 2) {
+            ctx.fillStyle = fillColor;
+            ctx.fillRect(x, y, w, h);
+            if (strokeColor) {
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth = lineWidth;
+                ctx.strokeRect(x, y, w, h);
+            }
+        }
+
+        // Vẽ hình tròn (chấm tròn / quân cờ)
+        function drawCircle(centerX, centerY, radius, fillColor, strokeColor = null, lineWidth = 2) {
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+            ctx.fillStyle = fillColor;
+            ctx.fill();
+            if (strokeColor) {
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth = lineWidth;
+                ctx.stroke();
+            }
+            ctx.closePath();
+        }
+
+        // Vẽ mũi tên (cho ô xuất quân)
+        function drawArrow(centerX, centerY, size) {
+            ctx.beginPath();
+            ctx.moveTo(centerX - size/2, centerY - size/2);
+            ctx.lineTo(centerX + size/2, centerY);
+            ctx.lineTo(centerX - size/2, centerY + size/2);
+            ctx.closePath();
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fill();
+        }
+
+        // ==========================================
+        // HÀM VẼ CHÍNH (PHASE 1)
+        // ==========================================
+        function drawQuarterBoard() {
+            // 1. Xóa nền và vẽ màu nền
+            ctx.fillStyle = CONFIG.colors.background;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const U = CONFIG.U;
+            const cell = CONFIG.cellSize * U; // 80px
+
+            // --------------------------------------------------
+            // 2. VẼ CHUỒNG (NEST) - Nằm ở góc dưới bên trái
+            // --------------------------------------------------
+            // Kích thước chuồng: 6U x 6U (tương đương 3x3 ô vuông)
+            const nestX = 1 * U;
+            const nestY = 9 * U;
+            const nestSize = 6 * U;
+
+            // Vẽ nền chuồng
+            drawRect(nestX, nestY, nestSize, nestSize, CONFIG.colors.nestGreen, CONFIG.colors.border, 3);
+
+            // Vẽ 4 vị trí đặt quân cờ trong chuồng (đường kính 1U, bán kính 0.5U)
+            const pieceRadius = 0.5 * U;
+            const padding = 1.5 * U; // Khoảng cách từ lề chuồng đến tâm quân cờ
+            
+            const nestCenters = [
+                { x: nestX + padding, y: nestY + padding },
+                { x: nestX + nestSize - padding, y: nestY + padding },
+                { x: nestX + padding, y: nestY + nestSize - padding },
+                { x: nestX + nestSize - padding, y: nestY + nestSize - padding }
+            ];
+
+            nestCenters.forEach((pos, index) => {
+                drawCircle(pos.x, pos.y, pieceRadius, CONFIG.colors.piece, '#FFFFFF', 3);
+                // Lưu tọa độ tâm quân cờ vào mảng nodes
+                nodes.nestCircles.push({ id: `nest_${index}`, x: pos.x, y: pos.y, radius: pieceRadius });
+            });
+
+            // --------------------------------------------------
+            // 3. VẼ ĐƯỜNG ĐI CHÍNH (MAIN TRACK) - Màu trắng
+            // --------------------------------------------------
+            // Đường đi gồm các ô 2U x 2U. Bắt đầu từ ô xuất quân, đi sang phải, rồi đi lên.
+            
+            // Tọa độ bắt đầu của đường đi (ô vuông đầu tiên)
+            let trackStartX = 4 * U; // Cách lề trái 4U
+            let trackStartY = 14 * U; // Cách lề trên 14U (tức là sát lề dưới)
+
+            // Vẽ hàng ngang dưới cùng (từ trái sang phải)
+            for (let i = 0; i < 6; i++) {
+                let x = trackStartX + (i * 2 * U);
+                let y = trackStartY;
+                
+                // Ô xuất quân (ô đầu tiên) có màu xanh và mũi tên
+                if (i === 0) {
+                    drawRect(x, y, 2*U, 2*U, CONFIG.colors.startSquare);
+                    drawArrow(x + U, y + U, U * 0.8);
+                    nodes.startSquare = { x: x + U, y: y + U };
+                } else {
+                    drawRect(x, y, 2*U, 2*U, CONFIG.colors.track);
+                }
+                // Lưu tọa độ tâm của ô vào mảng nodes
+                nodes.mainTrack.push({ x: x + U, y: y + U, type: 'track' });
+            }
+
+            // Vẽ hàng dọc bên phải (từ dưới lên trên)
+            let verticalStartX = trackStartX + (5 * 2 * U); // Cột cuối cùng của hàng ngang
+            for (let i = 1; i < 7; i++) {
+                let x = verticalStartX;
+                let y = trackStartY - (i * 2 * U);
+                
+                // Ô an toàn (có chấm tròn xanh) - thường là ô thứ 3 hoặc 4 trên đường đi
+                if (i === 3) {
+                    drawRect(x, y, 2*U, 2*U, CONFIG.colors.track);
+                    drawCircle(x + U, y + U, 0.5 * U, CONFIG.colors.safety);
+                } else {
+                    drawRect(x, y, 2*U, 2*U, CONFIG.colors.track);
+                }
+                nodes.mainTrack.push({ x: x + U, y: y + U, type: 'track' });
+            }
+
+            // --------------------------------------------------
+            // 4. VẼ ĐƯỜNG VỀ ĐÍCH (HOME PATH) - Màu xanh lá
+            // --------------------------------------------------
+            // Đường về đích nằm ở hàng thứ 3 (tính từ trên xuống), đi từ phải sang trái
+            let homePathY = 3 * 2 * U; // y = 6U
+            let homePathStartX = 6 * 2 * U; // x = 12U
+
+            for (let i = 0; i < 6; i++) {
+                let x = homePathStartX - (i * 2 * U);
+                let y = homePathY;
+                
+                drawRect(x, y, 2*U, 2*U, CONFIG.colors.homePath);
+                nodes.homePath.push({ x: x + U, y: y + U, type: 'home' });
+            }
+
+            // --------------------------------------------------
+            // 5. VẼ CÁC CHẤM TRÒN TRÊN ĐƯỜNG ĐI (SAFETY SQUARES)
+            // --------------------------------------------------
+            // Ô xuất quân đã có mũi tên, ta thêm chấm tròn cho các ô an toàn khác nếu muốn
+            // Ví dụ: Ô trước khi vào đường về đích
+            let safetyX = verticalStartX + U;
+            let safetyY = homePathY + U - (2 * U); // Ô ngay trước khi rẽ vào đường về đích
+            drawCircle(safetyX, safetyY, 0.5 * U, CONFIG.colors.safety);
+
+            // --------------------------------------------------
+            // 6. VẼ LƯỚI DEBUG (Tùy chọn - Giúp căn chỉnh tọa độ)
+            // --------------------------------------------------
+            // ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+            // ctx.lineWidth = 1;
+            // for (let i = 0; i <= GRID_SIZE * 2; i++) {
+            //     ctx.beginPath();
+            //     ctx.moveTo(i * U, 0);
+            //     ctx.lineTo(i * U, canvas.height);
+            //     ctx.stroke();
+            //     ctx.beginPath();
+            //     ctx.moveTo(0, i * U);
+            //     ctx.lineTo(canvas.width, i * U);
+            //     ctx.stroke();
+            // }
+        }
+
+        // Chạy hàm vẽ
+        drawQuarterBoard();
+
+        // Log dữ liệu tọa độ ra console để kiểm tra cho Phase 2
+        console.log("Dữ liệu tọa độ các Node (Phase 1):", nodes);
+    </script>
+</body>
+</html>
