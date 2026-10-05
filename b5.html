@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Cá Ngựa 3D — Bàn vàng ánh kim Modular</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080706;font-family:Arial,sans-serif}
+#hud{position:fixed;left:12px;top:12px;z-index:5;color:#fff;background:rgba(0,0,0,.42);padding:9px 12px;border:1px solid rgba(255,215,90,.35);border-radius:10px;backdrop-filter:blur(5px);font-size:13px;line-height:1.45}
+#hud b{color:#ffd96a}
+#loading{position:fixed;inset:0;display:grid;place-items:center;color:#ffe29a;background:#080706;z-index:20}
+</style>
+</head>
+<body>
+<div id="loading">Đang dựng bàn cờ 3D…</div>
+<div id="hud"><b>CÁ NGỰA 3D</b><br>Vàng ánh kim · nút kim cương · ô tròn dập lõm<br>Kéo để xoay · chụm để zoom</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+
+// ============================================================
+// 1. HỆ TỌA ĐỘ MODULE — giữ đúng logic 40 × 40, gốc dưới trái
+// ============================================================
+const GRID = 40;
+const Z = 0;
+const BOARD_Y = 0;
+const GOLD = 0xD7A72A;
+const GOLD_DARK = 0x8A5A0A;
+const GOLD_LIGHT = 0xF4D36A;
+const DARK = 0x241707;
+
+// ============================================================
+// 2. THREE.JS SCENE
+// ============================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x070604);
+scene.fog = new THREE.Fog(0x070604, 55, 105);
+
+const camera = new THREE.PerspectiveCamera(38, innerWidth/innerHeight, 0.1, 200);
+camera.position.set(0, 34, 43);
+
+const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+document.body.appendChild(renderer.domElement);
+
+const ControlsClass = THREE.OrbitControls;
+if (!ControlsClass) throw new Error('OrbitControls không được tải');
+const controls = new ControlsClass(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 28;
+controls.maxDistance = 72;
+controls.target.set(0,0,0);
+controls.maxPolarAngle = Math.PI * 0.49;
+
+scene.add(new THREE.HemisphereLight(0xfff1bd,0x24170a,2.0));
+const key = new THREE.DirectionalLight(0xffe4a0,4.2); key.position.set(-18,42,20); scene.add(key);
+const fill = new THREE.DirectionalLight(0xffc75a,2.0); fill.position.set(30,20,-30); scene.add(fill);
+const rim = new THREE.PointLight(0xffd76b,60,90,2); rim.position.set(0,28,0); scene.add(rim);
+
+// ============================================================
+// 3. CHUYỂN TỌA ĐỘ LOGIC → 3D
+//    X,Y của bản vẽ thành X,Z; độ cao dùng Y.
+// ============================================================
+const S = 1.0;
+function p(x,y,h=0){ return new THREE.Vector3((x-20)*S,h,(20-y)*S); }
+
+// ============================================================
+// 4. MATERIALS — kim loại vàng ánh kim
+// ============================================================
+const goldMat = new THREE.MeshStandardMaterial({color:GOLD,metalness:0.93,roughness:0.23});
+const goldEdgeMat = new THREE.MeshStandardMaterial({color:GOLD_DARK,metalness:0.97,roughness:0.18});
+const goldLightMat = new THREE.MeshStandardMaterial({color:GOLD_LIGHT,metalness:0.88,roughness:0.20});
+const recessMat = new THREE.MeshStandardMaterial({color:0x5A3A08,metalness:0.90,roughness:0.30});
+const darkMat = new THREE.MeshStandardMaterial({color:DARK,metalness:0.80,roughness:0.27});
+
+// ============================================================
+// 5. BOARD BASE — 40×40, mép ngoài 2 đơn vị
+// ============================================================
+const boardGroup = new THREE.Group();
+scene.add(boardGroup);
+
+const baseGeo = new THREE.BoxGeometry(40,1.35,40,1,1,1);
+const base = new THREE.Mesh(baseGeo,goldEdgeMat);
+base.position.y = -0.68;
+boardGroup.add(base);
+
+const topGeo = new THREE.BoxGeometry(36,0.72,36);
+const top = new THREE.Mesh(topGeo,goldMat);
+top.position.y = 0.02;
+boardGroup.add(top);
+
+// Viền 2 đơn vị: 4 thanh kim loại nổi
+function addBar(x,z,w,d,h=0.65,mat=goldLightMat){
+  const g=new THREE.BoxGeometry(w,h,d);
+  const m=new THREE.Mesh(g,mat); m.position.set(x,h/2+0.03,z); boardGroup.add(m); return m;
+}
+addBar(0,-19,40,2,0.72); addBar(0,19,40,2,0.72);
+addBar(-19,0,2,36,0.72); addBar(19,0,2,36,0.72);
+
+// ============================================================
+// 6. MODULE: HÌNH TRÒN DẬP LÕM
+//    Chỉ định nghĩa 1 lần, sau đó gọi recessCircleAt(x,y).
+// ============================================================
+const circleGroup = new THREE.Group();
+boardGroup.add(circleGroup);
+
+const recessOuterGeo = new THREE.CylinderGeometry(1.08,1.08,0.16,48);
+const recessInnerGeo = new THREE.CylinderGeometry(0.83,0.92,0.18,48);
+const recessRingGeo = new THREE.TorusGeometry(0.93,0.075,12,48);
+
+function recessCircleAt(x,y){
+  const g=new THREE.Group();
+  const outer=new THREE.Mesh(recessOuterGeo,recessMat); outer.position.y=0.43;
+  const inner=new THREE.Mesh(recessInnerGeo,goldEdgeMat); inner.position.y=0.50;
+  const ring=new THREE.Mesh(recessRingGeo,goldLightMat); ring.rotation.x=Math.PI/2; ring.position.y=0.61;
+  g.add(outer,inner,ring); g.position.copy(p(x,y)); circleGroup.add(g);
+  return g;
+}
+
+// ============================================================
+// 7. MODULE: VIÊN KIM CƯƠNG PHÂN CHIA
+//    Một viên duy nhất → gọi nhiều tọa độ.
+// ============================================================
+const diamondGroup = new THREE.Group();
+boardGroup.add(diamondGroup);
+const diamondGeo = new THREE.OctahedronGeometry(0.34,0);
+const diamondEdgeGeo = new THREE.OctahedronGeometry(0.38,0);
+
+function diamondAt(x,y,scale=1){
+  const g=new THREE.Group();
+  const edge=new THREE.Mesh(diamondEdgeGeo,goldEdgeMat); edge.scale.setScalar(scale);
+  const face=new THREE.Mesh(diamondGeo,goldLightMat); face.scale.setScalar(scale*0.92); face.position.y=0.08;
+  g.add(edge,face); g.position.copy(p(x,y,0.45)); diamondGroup.add(g); return g;
+}
+
+// ============================================================
+// 8. MODULE: HÀNG NÚT KIM CƯƠNG
+// ============================================================
+function diamondRow(a,b,spacing=1){
+  const dx=b[0]-a[0], dy=b[1]-a[1];
+  const len=Math.hypot(dx,dy);
+  const n=Math.floor(len/spacing);
+  for(let i=0;i<=n;i++){
+    const t=i/n;
+    diamondAt(a[0]+dx*t,a[1]+dy*t,0.82);
+  }
+}
+
+// Các đường phân chia chính của module dấu thập
+// (không dùng đường kẻ phẳng: thay bằng hàng nút kim cương)
+const rows = [
+  [[2.5,18],[18,18]], [[2.5,22],[18,22]],
+  [[22,18],[37.5,18]], [[22,22],[37.5,22]],
+  [[18,2.5],[18,18]], [[22,2.5],[22,18]],
+  [[18,22],[18,37.5]], [[22,22],[22,37.5]],
+  [[2,26],[14,26]], [[26,26],[38,26]],
+  [[2,14],[14,14]], [[26,14],[38,14]],
+  [[14,26],[14,38]], [[26,26],[26,38]],
+  [[14,2],[14,14]], [[26,2],[26,14]]
+];
+rows.forEach(r=>diamondRow(r[0],r[1],1));
+
+// Viền ngoài cũng là hàng nút kim cương
+[[2,2,38,2],[2,38,38,38],[2,2,2,38],[38,2,38,38]].forEach(v=>diamondRow([v[0],v[1]],[v[2],v[3]],1.15));
+
+// ============================================================
+// 9. VỊ TRÍ CÁC Ô TRÒN — lấy trực tiếp từ module 40×40 trước đó
+// ============================================================
+const originals=[];
+function addLine(x1,y1,x2,y2){
+  const COUNT=7;
+  for(let i=0;i<COUNT;i++){
+    const t=i/(COUNT-1); originals.push([x1+(x2-x1)*t,y1+(y2-y1)*t]);
+  }
+}
+addLine(16,1,16,16);
+addLine(20,4,20,18);
+addLine(24,1,24,16);
+originals.push([20,1]);
+
+function rot(pt,deg){
+  const a=deg*Math.PI/180,dx=pt[0]-20,dy=pt[1]-20;
+  return [20+dx*Math.cos(a)-dy*Math.sin(a),20+dx*Math.sin(a)+dy*Math.cos(a)];
+}
+const allCircles=[];
+for(const pt of originals){ allCircles.push(pt); }
+for(const deg of [90,180,270]) for(const pt of originals) allCircles.push(rot(pt,deg));
+
+// Loại điểm trùng nhau để tránh dập chồng.
+const seen=new Set();
+for(const [x,y] of allCircles){
+  const k=x.toFixed(4)+','+y.toFixed(4);
+  if(!seen.has(k)){seen.add(k); recessCircleAt(x,y);}
+}
+
+// ============================================================
+// 10. 4 KHU CHUỒNG — nền lõm nhẹ, giữ module vàng
+// ============================================================
+function stable(x0,y0,x1,y1){
+  const w=x1-x0,d=y1-y0;
+  const g=new THREE.BoxGeometry(w,0.18,d);
+  const m=new THREE.Mesh(g,goldLightMat);
+  const c=p((x0+x1)/2,(y0+y1)/2,0.48); m.position.set(c.x,0.48,c.z); boardGroup.add(m);
+  // viền khu chuồng
+  const t=0.28;
+  addBar(p((x0+x1)/2, y0).x, p((x0+x1)/2,y0).z,w,t,0.58,goldEdgeMat);
+  addBar(p((x0+x1)/2, y1).x, p((x0+x1)/2,y1).z,w,t,0.58,goldEdgeMat);
+  addBar(p(x0,(y0+y1)/2).x,p(x0,(y0+y1)/2).z,t,d,0.58,goldEdgeMat);
+  addBar(p(x1,(y0+y1)/2).x,p(x1,(y0+y1)/2).z,t,d,0.58,goldEdgeMat);
+}
+stable(2,26,14,38); stable(26,26,38,38); stable(2,2,14,14); stable(26,2,38,14);
+
+// ============================================================
+// 11. HÌNH THẬP TRUNG TÂM — mặt lõm bằng kim loại
+// ============================================================
+const center = new THREE.Group(); boardGroup.add(center);
+function centerPoly(points){
+  const shape=new THREE.Shape();
+  points.forEach((q,i)=>{const v=p(q[0],q[1],0); if(i===0)shape.moveTo(v.x,-v.z); else shape.lineTo(v.x,-v.z);}); shape.closePath();
+  const geo=new THREE.ExtrudeGeometry(shape,{depth:0.42,bevelEnabled:true,bevelSize:0.12,bevelThickness:0.12,bevelSegments:2});
+  const mesh=new THREE.Mesh(geo,goldMat); mesh.rotation.x=-Math.PI/2; mesh.position.y=0.56; center.add(mesh);
+}
+centerPoly([[18,18],[18,22],[14,26],[14,22],[2.5,22],[2.5,18],[14,18],[14,14],[18,18]]);
+// Oops above is not ideal; add four clean arm plates as boxes with pointed inner ends.
+center.clear();
+function arm(points){centerPoly(points)}
+arm([[18,18],[18,22],[14,22],[14,24],[2.5,24],[2.5,18],[14,18],[14,16]]);
+arm([[18,22],[22,22],[22,26],[24,26],[24,37.5],[18,37.5],[18,26],[16,26]]);
+arm([[22,22],[22,18],[26,18],[26,16],[37.5,16],[37.5,22],[26,22],[26,24]]);
+arm([[22,18],[18,18],[18,14],[16,14],[16,2.5],[22,2.5],[22,14],[24,14]]);
+
+// Center cap
+const capGeo=new THREE.CylinderGeometry(2.2,2.2,0.5,8);
+const cap=new THREE.Mesh(capGeo,goldLightMat); cap.rotation.y=Math.PI/8; cap.position.y=0.82; boardGroup.add(cap);
+
+// ============================================================
+// 12. TRANG TRÍ: viền bevel bằng torus-like rails
+// ============================================================
+function rail(x,z,w,d){ const m=new THREE.Mesh(new THREE.BoxGeometry(w,0.16,d),goldLightMat);m.position.set(x,1.02,z);boardGroup.add(m); }
+rail(0,-19,40,.18);rail(0,19,40,.18);rail(-19,0,.18,36);rail(19,0,.18,36);
+
+// ============================================================
+// 13. MẶT PHẲNG SÀN
+// ============================================================
+const floor=new THREE.Mesh(new THREE.CircleGeometry(80,64),new THREE.MeshStandardMaterial({color:0x090807,metalness:.35,roughness:.65}));
+floor.rotation.x=-Math.PI/2; floor.position.y=-1.4; scene.add(floor);
+
+// ============================================================
+// 14. RESIZE / RENDER
+// ============================================================
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+function hideLoading(){ const el=document.getElementById('loading'); if(el) el.remove(); }
+window.addEventListener('error', (e)=>{
+  const el=document.getElementById('loading');
+  if(el){ el.innerHTML='Không thể tải thư viện 3D. Hãy kiểm tra kết nối Internet rồi mở lại file.'; el.style.color='#ffb0a8'; }
+});
+if (typeof THREE === 'undefined') {
+  const el=document.getElementById('loading');
+  if(el) el.innerHTML='Không tải được Three.js. Hãy kiểm tra Internet.';
+} else if (typeof THREE.OrbitControls === 'undefined') {
+  const el=document.getElementById('loading');
+  if(el) el.innerHTML='Không tải được OrbitControls. Đang thử tải lại...';
+} else {
+  hideLoading();
+  function animate(){requestAnimationFrame(animate);controls.update();renderer.render(scene,camera)}
+  animate();
+}
+</script>
+</body>
+</html>
