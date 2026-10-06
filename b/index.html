@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Cá Ngựa 3D — Offline Test</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080704;font-family:system-ui,sans-serif}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+#ui{position:fixed;inset:0;pointer-events:none;z-index:10}
+#ui *{pointer-events:auto}
+#top{position:absolute;left:0;right:0;top:0;padding:10px 12px;display:flex;gap:8px;align-items:center;
+ background:linear-gradient(180deg,rgba(0,0,0,.75),transparent);flex-wrap:wrap}
+.badge{padding:6px 12px;border-radius:8px;font-weight:700;font-size:14px;color:#fff;border:1px solid rgba(255,255,255,.25)}
+#btnRoll{margin-left:auto;padding:12px 22px;border:0;border-radius:12px;font-weight:800;font-size:16px;
+ background:#f59e0b;color:#111;box-shadow:0 4px 14px rgba(245,158,11,.45)}
+#btnRoll:disabled{opacity:.4}
+#banner{position:absolute;left:50%;top:58px;transform:translateX(-50%);padding:8px 16px;border-radius:10px;
+ background:rgba(0,0,0,.7);color:#fde68a;font-size:14px;font-weight:600;max-width:90%;text-align:center}
+#actions{position:absolute;left:8px;right:8px;bottom:18px;display:none;flex-wrap:wrap;gap:8px;justify-content:center}
+#actions button{padding:12px 16px;border-radius:12px;border:1px solid rgba(255,255,255,.2);
+ background:rgba(20,20,20,.88);color:#fff;font-weight:700;font-size:14px}
+#actions button.kick{border-color:#f87171;color:#fecaca}
+#actions button.exit{border-color:#4ade80;color:#bbf7d0}
+#actions button.home{border-color:#60a5fa;color:#bfdbfe}
+#overlay{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.82);z-index:20}
+#overlay.show{display:grid}
+#diceBig{font-size:120px;font-weight:900;color:#fbbf24;text-shadow:0 0 40px rgba(251,191,36,.5)}
+#diceLabel{color:#fde68a;font-size:18px;margin-top:8px;text-align:center}
+#win{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.85);z-index:30;color:#fde68a;font-size:28px;font-weight:800;text-align:center;padding:24px}
+#setup{position:fixed;inset:0;display:grid;place-items:center;background:#12080a;z-index:40;color:#fde68a}
+#setup h1{margin:0 0 16px;font-size:22px}
+#setup button{margin:6px;padding:14px 24px;border-radius:12px;border:1px solid #d4af37;background:#1a1010;color:#fde68a;font-weight:700;font-size:16px}
+</style>
+</head>
+<body>
+<div id="setup">
+  <div style="text-align:center">
+    <h1>Cá Ngựa 3D — Test Offline</h1>
+    <p style="opacity:.8;margin-bottom:20px">Chọn số người (chung 1 máy)</p>
+    <button data-n="2">2 người</button>
+    <button data-n="3">3 người</button>
+    <button data-n="4">4 người</button>
+  </div>
+</div>
+<div id="ui" style="display:none">
+  <div id="top">
+    <span id="turnBadge" class="badge">—</span>
+    <span id="diceBadge" class="badge" style="background:#333">Xúc: —</span>
+    <button id="btnRoll">LẮC</button>
+  </div>
+  <div id="banner">Chạm LẮC để bắt đầu lượt</div>
+  <div id="actions"></div>
+</div>
+<div id="overlay"><div><div id="diceBig">?</div><div id="diceLabel">Đang lắc…</div></div></div>
+<div id="win"></div>
+<div id="err" style="display:none;color:#fbbf24;padding:20px;text-align:center"></div>
+
+<script src="three.min.js"></script>
+<script src="OrbitControls.js"></script>
+<script src="board-data.js"></script>
+<script src="rules.js"></script>
+<script>
+if (!window.THREE) {
+  document.getElementById('err').style.display = 'block';
+  document.getElementById('err').textContent = 'Không tải được three.min.js';
+  throw new Error('THREE');
+}
+
+/* ═══════════════ Horse3D (rút gọn từ horse3d.js) ═══════════════ */
+const TAU = Math.PI * 2, DEG = Math.PI / 180;
+const HORSE_STANDARD = { BASE_DIAMETER: 8, PEDESTAL_TOP: 2.6, UPPER_SCALE: 1.5, ACCENT: 0xf59e0b };
+const HEADING = { EAST: 0, NORTH: 90, WEST: 180, SOUTH: -90 };
+const EASE = { linear: t => t, out: t => 1 - Math.pow(1 - t, 3), inOut: t => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2) };
+let SHARED = null;
+function createHorseShape() {
+  const s = new THREE.Shape();
+  s.moveTo(-0.9, -0.2);
+  s.bezierCurveTo(-1.3, 1.5, -1.4, 3.2, -0.9, 4.6);
+  s.bezierCurveTo(-1.0, 5.4, -0.8, 6.2, -0.3, 6.6);
+  s.lineTo(-0.1, 6.7);
+  s.bezierCurveTo(0.0, 5.9, 0.3, 5.5, 0.7, 5.3);
+  s.bezierCurveTo(1.3, 5.0, 2.3, 4.3, 2.7, 3.6);
+  s.bezierCurveTo(2.8, 3.1, 2.3, 2.8, 1.8, 2.9);
+  s.bezierCurveTo(1.4, 2.7, 1.0, 2.3, 0.8, 1.7);
+  s.bezierCurveTo(0.6, 0.9, 0.7, 0.3, 0.8, -0.2);
+  s.closePath();
+  return s;
+}
+function getShared() {
+  if (SHARED) return SHARED;
+  const horseGeo = new THREE.ExtrudeGeometry(createHorseShape(), {
+    steps: 2, depth: 1.4, bevelEnabled: true, bevelThickness: 0.35, bevelSize: 0.3, bevelOffset: 0, bevelSegments: 4
+  });
+  horseGeo.center(); horseGeo.computeBoundingBox();
+  SHARED = {
+    horseGeo,
+    bot: new THREE.CylinderGeometry(3.6, 4.0, 0.8, 32),
+    mid: new THREE.CylinderGeometry(3.0, 3.4, 0.6, 32),
+    top: new THREE.CylinderGeometry(2.4, 3.0, 1.2, 32),
+    belt: new THREE.TorusGeometry(3.2, 0.15, 12, 32),
+    dims: null
+  };
+  return SHARED;
+}
+function makeMat(color) {
+  return new THREE.MeshPhysicalMaterial({ color, roughness: 0.15, metalness: 0.05, clearcoat: 1, clearcoatRoughness: 0.1 });
+}
+class Horse3D {
+  constructor(o = {}) {
+    const sh = getShared();
+    this.color = o.color ?? 0xdc2626;
+    this.size = 1;
+    this.state = { pos: new THREE.Vector3(), heading: 0 };
+    this._tracks = [];
+    this._acc = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, hd: 0, nz: 0, ny: 0 };
+    this.mat = makeMat(this.color);
+    this.beltMat = new THREE.MeshStandardMaterial({ color: HORSE_STANDARD.ACCENT, metalness: 0.8, roughness: 0.2 });
+    this.logicId = o.logicId ?? -1;
+    const model = new THREE.Group();
+    const body = (geo, y) => {
+      const m = new THREE.Mesh(geo, this.mat);
+      m.position.y = y; m.castShadow = true; model.add(m);
+    };
+    body(sh.bot, 0.4); body(sh.mid, 1.1); body(sh.top, 2.0);
+    const belt = new THREE.Mesh(sh.belt, this.beltMat);
+    belt.rotation.x = Math.PI / 2; belt.position.y = 0.8; model.add(belt);
+    this.neck = new THREE.Group();
+    this.neck.position.y = HORSE_STANDARD.PEDESTAL_TOP;
+    model.add(this.neck);
+    const upper = new THREE.Group();
+    upper.scale.setScalar(HORSE_STANDARD.UPPER_SCALE);
+    upper.position.y = -sh.horseGeo.boundingBox.min.y * HORSE_STANDARD.UPPER_SCALE;
+    this.neck.add(upper);
+    const head = new THREE.Mesh(sh.horseGeo, this.mat);
+    head.position.x = 0.75; head.castShadow = true; upper.add(head);
+    if (!sh.dims) {
+      const b = new THREE.Box3().setFromObject(model);
+      const height = b.max.y - b.min.y;
+      const cy = b.min.y + height / 2;
+      sh.dims = { height, centerY: cy, baseDiameter: HORSE_STANDARD.BASE_DIAMETER };
+    }
+    this.dims = sh.dims;
+    this.root = new THREE.Group();
+    this.root.userData.horse3d = this;
+    this.pivot = new THREE.Group();
+    this.pivot.position.y = this.dims.centerY;
+    this.root.add(this.pivot);
+    model.position.y = -this.dims.centerY;
+    this.pivot.add(model);
+    if (o.size) this.setSize(o.size);
+    if (o.heading != null) this.setHeading(o.heading);
+    if (o.position) this.setPosition(o.position);
+  }
+  setSize(s) { this.size = s; this.root.scale.setScalar(s); return this; }
+  setPosition(x, y, z) {
+    if (typeof x === 'object') { y = x.y ?? 0; z = x.z ?? 0; x = x.x ?? 0; }
+    this.state.pos.set(x ?? 0, y ?? 0, z ?? 0);
+    this._apply(this._acc);
+    return this;
+  }
+  setHeading(deg) { this.state.heading = deg * DEG; this._apply(this._acc); return this; }
+  get busy() { return this._tracks.some(t => !t.loop); }
+  play(name, o = {}) {
+    return new Promise(resolve => {
+      const from = this.state.pos.clone();
+      const to = o.to || { x: from.x, z: from.z };
+      const dest = new THREE.Vector3(to.x, from.y, to.z);
+      const dx = dest.x - from.x, dz = dest.z - from.z;
+      const delta = Math.hypot(dx, dz) > 1e-6 ? Math.atan2(-dz, dx) - this.state.heading : 0;
+      const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+      const dlt = wrap(delta);
+      const height = (o.height ?? 4.6) * this.size;
+      const dur = o.duration ?? 0.7;
+      this._tracks.push({
+        t0: 0, dur, resolve,
+        step(t, acc, k) {
+          const arc = Math.sin(Math.PI * t);
+          acc.x += (dest.x - from.x) * k;
+          acc.z += (dest.z - from.z) * k;
+          acc.y += arc * height;
+          acc.hd += dlt * EASE.out(Math.min(1, t / 0.3));
+          acc.rx += arc * 0.15;
+        },
+        end: () => {
+          this.state.pos.copy(dest);
+          this.state.heading = wrap(this.state.heading + dlt);
+        }
+      });
+    });
+  }
+  stop() { this._tracks.forEach(tr => tr.resolve && tr.resolve(false)); this._tracks = []; return this; }
+  update(dt) {
+    dt = Math.min(Math.max(dt, 0), 0.1);
+    const acc = this._acc = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, hd: 0, nz: 0, ny: 0 };
+    for (const tr of this._tracks.slice()) {
+      tr.t0 += dt;
+      let t = tr.t0 / tr.dur;
+      if (t >= 1) {
+        this._tracks.splice(this._tracks.indexOf(tr), 1);
+        tr.end && tr.end();
+        tr.resolve && tr.resolve(true);
+      } else {
+        tr.step(t, acc, EASE.inOut(t));
+      }
+    }
+    this._apply(acc);
+  }
+  _apply(acc) {
+    const s = this.state;
+    this.root.position.set(s.pos.x + acc.x, s.pos.y + acc.y, s.pos.z + acc.z);
+    this.root.rotation.y = s.heading + acc.hd;
+    this.pivot.rotation.set(acc.rx, acc.ry, acc.rz);
+  }
+  addTo(p) { p.add(this.root); return this; }
+}
+
+/* ═══════════════ Scene ═══════════════ */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x080704);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.2, 200);
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xfff6e0, 0.55));
+const sun = new THREE.DirectionalLight(0xffe6b0, 1.15);
+sun.position.set(12, 28, 10);
+sun.castShadow = true;
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xffe8c8, 0x1a1208, 0.55));
+
+const GRID = 40, W = 28, S = W / GRID;
+function P(x, y, h = 0) { return new THREE.Vector3((x - 20) * S, h, (20 - y) * S); }
+
+const board = new THREE.Mesh(
+  new THREE.BoxGeometry(W, 0.75, W),
+  new THREE.MeshPhysicalMaterial({ color: 0xc99716, metalness: 0.9, roughness: 0.23, clearcoat: 1 })
+);
+board.position.y = -0.42; board.receiveShadow = true; scene.add(board);
+
+const rimGeo = new THREE.TorusGeometry(S * 0.98, S * 0.10, 10, 24);
+rimGeo.rotateX(Math.PI / 2);
+const dishGeo = new THREE.CylinderGeometry(S * 0.83, S * 0.94, S * 0.10, 24);
+const rimMat = new THREE.MeshStandardMaterial({ color: 0xf6d36a, metalness: 1, roughness: 0.16 });
+const dishMat = new THREE.MeshPhysicalMaterial({ color: 0xa9780b, metalness: 0.85, roughness: 0.3 });
+
+function rot(x, y, a) {
+  const dx = x - 20, dy = y - 20, r = a * Math.PI / 180;
+  return [20 + dx * Math.cos(r) - dy * Math.sin(r), 20 + dx * Math.sin(r) + dy * Math.cos(r)];
+}
+function slot(x, y, matR, matD) {
+  const g = new THREE.Group();
+  g.position.copy(P(x, y, 0.015));
+  const r = new THREE.Mesh(rimGeo, matR || rimMat); r.position.y = -0.005; g.add(r);
+  const d = new THREE.Mesh(dishGeo, matD || dishMat); d.position.y = 0.002; g.add(d);
+  scene.add(g);
+  return g;
+}
+
+const seen = new Set();
+for (let aidx = 0; aidx < 4; aidx++) {
+  const a = [0, 90, 180, 270][aidx];
+  for (const seg of [[16, 1, 16, 16], [24, 1, 24, 16]]) {
+    for (let i = 0; i < 6; i++) {
+      const t = i / 5;
+      const q = rot(seg[0] + (seg[2] - seg[0]) * t, seg[1] + (seg[3] - seg[1]) * t, a);
+      const k = q[0].toFixed(3) + ',' + q[1].toFixed(3);
+      if (!seen.has(k)) { seen.add(k); slot(q[0], q[1]); }
+    }
+  }
+  const q = rot(20, 1, a);
+  const k = q[0].toFixed(3) + ',' + q[1].toFixed(3);
+  if (!seen.has(k)) { seen.add(k); slot(q[0], q[1]); }
+}
+
+/* Home + START labels */
+const homeCols = [0x05070a, 0xf5f0df, 0xff0000, 0x0055ff];
+const startCells = BoardData.START;
+const entryCells = BoardData.ENTRY;
+Object.keys(BoardData.HOME).forEach(cid => {
+  const c = +cid;
+  const mat = new THREE.MeshStandardMaterial({ color: homeCols[[0, 1, 2, 3].indexOf(c) >= 0 ? [3, 1, 0, 2][c] : 0] });
+  // map colorId 0 black,1 ivory,2 red,3 blue to materials
+});
+const homeMatByColor = {
+  0: new THREE.MeshPhysicalMaterial({ color: 0x05070a, metalness: 0.4, roughness: 0.08, clearcoat: 1 }),
+  1: new THREE.MeshPhysicalMaterial({ color: 0xf5f0df, metalness: 0.08, roughness: 0.18, clearcoat: 0.5 }),
+  2: new THREE.MeshPhysicalMaterial({ color: 0xff0000, metalness: 0.08, roughness: 0.2, clearcoat: 0.4 }),
+  3: new THREE.MeshPhysicalMaterial({ color: 0x0055ff, metalness: 0.08, roughness: 0.2, clearcoat: 0.4 })
+};
+[0, 1, 2, 3].forEach(cid => {
+  BoardData.HOME[cid].forEach((cell, i) => {
+    const g = slot(cell.gx, cell.gy, homeMatByColor[cid], homeMatByColor[cid]);
+    // number sprite
+    const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = cid === 1 ? '#111' : '#fff';
+    ctx.font = 'bold 40px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(i + 1), 32, 34);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true }));
+    sp.scale.set(S * 0.9, S * 0.9, 1);
+    sp.position.copy(P(cell.gx, cell.gy, 0.2));
+    scene.add(sp);
+  });
+  // START label
+  const st = BoardData.START[cid];
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+  const ctx = cv.getContext('2d');
+  ctx.font = '600 36px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = cid === 1 ? '#171717' : '#ffffff';
+  ctx.fillText('Xuất', 128, 40); ctx.fillText('Phát', 128, 88);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false }));
+  sp.scale.set(S * 1.5, S * 0.75, 1);
+  sp.position.copy(P(st.gx, st.gy, 0.28));
+  scene.add(sp);
+});
+
+/* Pens */
+const penMats = [
+  new THREE.MeshPhysicalMaterial({ color: 0x05070a, metalness: 0.3, roughness: 0.05, clearcoat: 1 }),
+  new THREE.MeshPhysicalMaterial({ color: 0xf5f0df, metalness: 0.03, roughness: 0.1, clearcoat: 0.75 }),
+  new THREE.MeshPhysicalMaterial({ color: 0xff0000, metalness: 0.05, roughness: 0.3, clearcoat: 0.35 }),
+  new THREE.MeshPhysicalMaterial({ color: 0x0055ff, metalness: 0.05, roughness: 0.3, clearcoat: 0.35 })
+];
+BoardData.COLORS.forEach((c, i) => {
+  const p = c.pen;
+  const m = new THREE.Mesh(new THREE.BoxGeometry(14 * S, 0.055, 14 * S), penMats[i]);
+  m.position.copy(P(p.x0 + 7, p.y0 + 7, 0.018));
+  m.receiveShadow = true;
+  scene.add(m);
+});
+
+/* Border */
+const borderMat = new THREE.MeshStandardMaterial({ color: 0xf6d36a, metalness: 0.95, roughness: 0.18 });
+function borderLine(x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy);
+  if (L <= 0) return;
+  const m = new THREE.Mesh(new THREE.BoxGeometry(L * S, 0.22, S * 0.2), borderMat);
+  m.position.copy(P((x1 + x2) / 2, (y1 + y2) / 2, 0.16));
+  m.rotation.y = -Math.atan2(dy, dx);
+  scene.add(m);
+}
+function borderRect(x, y, w, h) {
+  borderLine(x, y, x + w, y); borderLine(x + w, y, x + w, y + h);
+  borderLine(x + w, y + h, x, y + h); borderLine(x, y + h, x, y);
+}
+borderRect(0, 0, 40, 40);
+borderRect(0, 0, 14, 14); borderRect(0, 26, 14, 14);
+borderRect(26, 26, 14, 14); borderRect(26, 0, 14, 14);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0);
+controls.enableDamping = true;
+controls.enablePan = false;
+controls.maxPolarAngle = 1.45;
+controls.minPolarAngle = 0.3;
+camera.position.set(0, 31, 29);
+controls.update();
+
+/* Horses visual */
+const HORSE_SIZE = (2 * S) / HORSE_STANDARD.BASE_DIAMETER;
+const visualHorses = new Map(); // logicId -> Horse3D
+
+function syncHorseVisual(h) {
+  let v = visualHorses.get(h.id);
+  const wp = P(h.gx, h.gy, 0);
+  const col = BoardData.COLORS[h.colorId];
+  if (!v) {
+    v = new Horse3D({
+      color: col.hex, size: HORSE_SIZE, heading: col.heading,
+      position: { x: wp.x, y: 0, z: wp.z }, logicId: h.id
+    });
+    v.addTo(scene);
+    visualHorses.set(h.id, v);
+  } else {
+    // jump anim handled elsewhere
+  }
+  return v;
+}
+
+function placeAll(state) {
+  state.horses.forEach(h => {
+    const v = syncHorseVisual(h);
+    const wp = P(h.gx, h.gy, 0);
+    v.setPosition(wp.x, 0, wp.z);
+    v.setHeading(BoardData.COLORS[h.colorId].heading);
+  });
+}
+
+/* Markers */
+const markerGroup = new THREE.Group(); scene.add(markerGroup);
+const markerGeo = new THREE.SphereGeometry(S * 0.35, 12, 10);
+const markerMat = new THREE.MeshPhysicalMaterial({
+  color: 0xffe066, emissive: 0xffc000, emissiveIntensity: 0.5, transparent: true, opacity: 0.9
+});
+function clearMarkers() {
+  while (markerGroup.children.length) markerGroup.remove(markerGroup.children[0]);
+}
+function showMoveMarkers(moves) {
+  clearMarkers();
+  moves.forEach(m => {
+    const mesh = new THREE.Mesh(markerGeo, markerMat.clone());
+    mesh.position.copy(P(m.toGx, m.toGy, 0.15));
+    mesh.userData.move = m;
+    markerGroup.add(mesh);
+  });
+}
+
+/* ═══════════════ Game ═══════════════ */
+let state = null;
+const sfxLand = new Audio('a1.mp3'); sfxLand.preload = 'auto';
+const sfxSel = new Audio('a2.mp3'); sfxSel.preload = 'auto';
+function playSfx(a) { try { a.pause(); a.currentTime = 0; a.play().catch(() => {}); } catch (_) {} }
+
+const turnBadge = document.getElementById('turnBadge');
+const diceBadge = document.getElementById('diceBadge');
+const banner = document.getElementById('banner');
+const btnRoll = document.getElementById('btnRoll');
+const actionsEl = document.getElementById('actions');
+const overlay = document.getElementById('overlay');
+const diceBig = document.getElementById('diceBig');
+const diceLabel = document.getElementById('diceLabel');
+
+function colorCss(cid) { return BoardData.COLORS[cid].css; }
+
+function refreshUI() {
+  if (!state) return;
+  const pl = state.players[state.current];
+  turnBadge.textContent = 'Lượt: ' + pl.name;
+  turnBadge.style.background = colorCss(pl.colorId);
+  diceBadge.textContent = state.dice ? ('Xúc: ' + state.dice) : 'Xúc: —';
+  btnRoll.disabled = state.phase !== 'turn';
+  if (state.phase === 'turn') banner.textContent = pl.name + ' — chạm LẮC';
+}
+
+async function doRoll() {
+  if (!state || state.phase !== 'turn') return;
+  btnRoll.disabled = true;
+  overlay.classList.add('show');
+  diceBig.textContent = '🎲';
+  diceLabel.textContent = 'Đang lắc…';
+  // animation ticks
+  let ticks = 0;
+  const iv = setInterval(() => {
+    diceBig.textContent = String(1 + Math.floor(Math.random() * 6));
+    ticks++;
+  }, 80);
+  await new Promise(r => setTimeout(r, 1200));
+  clearInterval(iv);
+  const dice = 1 + Math.floor(Math.random() * 6);
+  state.dice = dice;
+  diceBig.textContent = String(dice);
+  diceLabel.textContent = 'Mặt ' + dice;
+  await new Promise(r => setTimeout(r, 900));
+  overlay.classList.remove('show');
+
+  const moves = Rules.legalMoves(state, dice);
+  state.phase = 'choose';
+  refreshUI();
+
+  if (!moves.length) {
+    banner.textContent = 'Không có nước đi — bỏ lượt';
+    await new Promise(r => setTimeout(r, 900));
+    Rules.nextPlayer(state);
+    refreshUI();
+    return;
+  }
+
+  // nhóm theo type để chọn hành động
+  banner.textContent = 'Chọn hành động / quân (chạm marker hoặc nút)';
+  showMoveMarkers(moves);
+  renderActionButtons(moves);
+}
+
+function renderActionButtons(moves) {
+  actionsEl.style.display = 'flex';
+  actionsEl.innerHTML = '';
+  const labels = { exit: 'Xuất quân', move: 'Di chuyển', kick: 'Đá quân', home: 'Lên chuồng' };
+  // unique by horse+type
+  const seen = new Set();
+  moves.forEach((m, idx) => {
+    const key = m.type + '-' + m.horseId + '-' + m.toGx + '-' + m.toGy;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const h = state.horses.find(x => x.id === m.horseId);
+    const btn = document.createElement('button');
+    btn.className = m.type;
+    btn.textContent = (labels[m.type] || m.type) + ' #' + (h.slotIndex + 1) +
+      (m.kickId != null ? ' ⚡' : '');
+    btn.onclick = () => executeMove(m);
+    actionsEl.appendChild(btn);
+  });
+}
+
+async function executeMove(move) {
+  if (!state || state.phase !== 'choose') return;
+  state.phase = 'anim';
+  actionsEl.style.display = 'none';
+  actionsEl.innerHTML = '';
+  clearMarkers();
+  banner.textContent = 'Đang di chuyển…';
+
+  Rules.applyMove(state, move);
+  const h = state.horses.find(x => x.id === move.horseId);
+  const v = visualHorses.get(h.id);
+  const wp = P(h.gx, h.gy, 0);
+
+  // kick visual: victim snap back
+  if (move.kickId != null) {
+    const vic = state.horses.find(x => x.id === move.kickId);
+    const vv = visualHorses.get(vic.id);
+    if (vv) {
+      const pen = P(vic.gx, vic.gy, 0);
+      vv.play('jump', { to: { x: pen.x, z: pen.z }, height: 6, duration: 0.85 });
+    }
+  }
+
+  if (v) {
+    const dist = Math.hypot(wp.x - v.state.pos.x, wp.z - v.state.pos.z);
+    await v.play('jump', {
+      to: { x: wp.x, z: wp.z },
+      height: 3.5 + Math.min(dist * 0.2, 5),
+      duration: 0.5 + Math.min(dist * 0.04, 0.6)
+    });
+    playSfx(sfxLand);
+  }
+
+  if (state.winner != null) {
+    document.getElementById('win').style.display = 'grid';
+    document.getElementById('win').textContent = '🏆 ' + BoardData.COLORS[state.winner].name + ' thắng!';
+    return;
+  }
+
+  Rules.nextPlayer(state);
+  refreshUI();
+}
+
+btnRoll.addEventListener('click', doRoll);
+
+/* Raycast markers / horses */
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let downPos = null;
+renderer.domElement.addEventListener('pointerdown', e => {
+  downPos = { x: e.clientX, y: e.clientY };
+}, { passive: true });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!downPos) return;
+  const dx = e.clientX - downPos.x, dy = e.clientY - downPos.y;
+  downPos = null;
+  if (Math.hypot(dx, dy) > 10) return;
+  if (!state || state.phase !== 'choose') return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(markerGroup.children, false);
+  if (hits.length && hits[0].object.userData.move) {
+    executeMove(hits[0].object.userData.move);
+  }
+}, { passive: true });
+
+/* Start */
+document.querySelectorAll('#setup button').forEach(btn => {
+  btn.onclick = () => {
+    const n = +btn.dataset.n;
+    state = Rules.createGameState(n);
+    placeAll(state);
+    document.getElementById('setup').style.display = 'none';
+    document.getElementById('ui').style.display = 'block';
+    refreshUI();
+  };
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+let lastT = performance.now();
+(function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = (now - lastT) / 1000; lastT = now;
+  visualHorses.forEach(v => v.update(dt));
+  const pulse = 0.85 + 0.15 * Math.sin(now * 0.006);
+  markerGroup.children.forEach(m => m.scale.setScalar(pulse));
+  controls.update();
+  renderer.render(scene, camera);
+})(performance.now());
+</script>
+</body>
+</html>
