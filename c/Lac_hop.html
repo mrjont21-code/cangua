@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hộp Lắc Xúc Xắc Casino Hồng Kông</title>
+<style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050505}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+</head><body><script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+
+const scene=new THREE.Scene();
+scene.background = new THREE.Color(0x24070b);
+const camera=new THREE.PerspectiveCamera(38,innerWidth/innerHeight,.1,100);
+camera.position.set(0, 4.9, 9.6);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.15;
+document.body.appendChild(renderer.domElement);
+const controls=new OrbitControls(camera,renderer.domElement);
+controls.enableZoom=false; controls.enablePan=false; controls.enableRotate=false;
+
+scene.add(new THREE.AmbientLight(0xffffff,.8));
+const key=new THREE.DirectionalLight(0xffe9c4,3.5); key.position.set(3,7,4); scene.add(key);
+const rim=new THREE.PointLight(0x6688ff,2.0,12); rim.position.set(-4,4,-3); scene.add(rim);
+
+const black=new THREE.MeshPhysicalMaterial({color:0x070707,metalness:.7,roughness:.18});
+const black2=new THREE.MeshPhysicalMaterial({color:0x111111,metalness:.35,roughness:.25});
+const gold=new THREE.MeshPhysicalMaterial({color:0xb88a3a,metalness:.95,roughness:.18});
+const red=new THREE.MeshPhysicalMaterial({color:0x3a0707,metalness:.15,roughness:.22});
+
+const group=new THREE.Group(); group.position.y=-.2; scene.add(group);
+
+// Heavy casino base
+const base=new THREE.Mesh(new THREE.CylinderGeometry(2.05,.0,0.0,96),black); // placeholder removed
+base.geometry.dispose(); group.remove(base);
+
+const plinth=new THREE.Mesh(new THREE.CylinderGeometry(2.35,2.45,.42,96),black);
+plinth.position.y=.21; group.add(plinth);
+const plinthTop=new THREE.Mesh(new THREE.CylinderGeometry(2.12,2.25,.12,96),black2);
+plinthTop.position.y=.48; group.add(plinthTop);
+const goldRing=new THREE.Mesh(new THREE.TorusGeometry(2.18,.075,18,96),gold);
+goldRing.rotation.x=Math.PI/2; goldRing.position.y=.53; group.add(goldRing);
+
+const felt=new THREE.Mesh(new THREE.CylinderGeometry(1.98,1.98,.035,96),new THREE.MeshStandardMaterial({color:0x151515,roughness:.9}));
+felt.position.y=.565; group.add(felt);
+
+// Shaker body: black bell with gold collar
+const shaker=new THREE.Group(); shaker.position.y=.65; group.add(shaker);
+const shellMat=new THREE.MeshPhysicalMaterial({color:0x090909,metalness:.78,roughness:.2,clearcoat:.7,clearcoatRoughness:.12});
+const shell=new THREE.Mesh(new THREE.CylinderGeometry(1.55,1.72,1.95,64,true),shellMat);
+shell.position.y=.95; shaker.add(shell);
+const top=new THREE.Mesh(new THREE.SphereGeometry(1.56,64,32,0,Math.PI*2,0,Math.PI/2),shellMat);
+top.scale.y=.72; top.position.y=1.92; shaker.add(top);
+const collar=new THREE.Mesh(new THREE.TorusGeometry(1.68,.105,20,80),gold);
+collar.rotation.x=Math.PI/2; collar.position.y=.08; shaker.add(collar);
+const rim2=new THREE.Mesh(new THREE.TorusGeometry(1.55,.075,20,80),gold);
+rim2.rotation.x=Math.PI/2; rim2.position.y=1.92; shaker.add(rim2);
+
+// Dice hidden under shaker
+function dieMaterial(n){
+  const c=document.createElement('canvas'); c.width=c.height=128;
+  const x=c.getContext('2d'); x.fillStyle='#f2eadb'; x.fillRect(0,0,128,128);
+  x.fillStyle='#111'; const p=[[64,64],[32,32],[96,32],[32,96],[96,96],[32,64],[96,64],[64,32],[64,96]];
+  const sets={1:[0],2:[1,4],3:[1,0,4],4:[1,2,3,4],5:[1,2,0,3,4],6:[1,2,5,6,3,4]};
+  for(const i of sets[n]){x.beginPath();x.arc(p[i][0],p[i][1],11,0,Math.PI*2);x.fill();}
+  const t=new THREE.CanvasTexture(c); return new THREE.MeshStandardMaterial({map:t,roughness:.45});
+}
+const dice=[];
+for(let i=0;i<2;i++){
+  const d=new THREE.Mesh(new THREE.BoxGeometry(.62,.62,.62),[
+    dieMaterial(1),dieMaterial(2),dieMaterial(3),dieMaterial(4),dieMaterial(5),dieMaterial(6)
+  ]);
+  d.position.set((i-.5)*.65,.82,0); d.visible=false; group.add(d); dice.push(d);
+}
+
+let shaking=false, t0=0, dur=2400;
+const audio=new Audio("https://orangefreesounds.com/wp-content/uploads/2026/04/Dice-rolling-on-wooden-table-board-game-sound-effect.mp3");
+audio.preload="auto"; audio.volume=.72;
+
+function shake(){
+  shaking=true; t0=performance.now();
+  try{audio.currentTime=0; audio.play().catch(()=>{});}catch(e){}
+}
+shake();
+addEventListener('pointerdown',shake);
+addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();shake();}});
+
+function animate(now){
+  requestAnimationFrame(animate);
+  if(shaking){
+    const t=now-t0, p=Math.min(t/dur,1);
+    const amp=Math.sin(Math.PI*p);
+    shaker.position.x=Math.sin(t*.041)*.25*amp;
+    shaker.position.z=Math.cos(t*.037)*.16*amp;
+    shaker.rotation.x=Math.sin(t*.047)*.055*amp;
+    shaker.rotation.z=Math.cos(t*.052)*.075*amp;
+    shaker.rotation.y=Math.sin(t*.031)*.18*amp;
+    if(p>=1){shaking=false;shaker.position.set(0,.65,0);shaker.rotation.set(0,0,0);}
+  }
+  renderer.render(scene,camera);
+}
+animate(performance.now());
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+</script></body></html>
