@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>Slide Mở Hộp Xúc Xắc — Mặt 6 — V2</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#12080a}
+#app{width:100%;height:100%;position:relative}
+canvas{display:block;width:100%;height:100%}
+#label{
+ position:absolute;left:50%;bottom:24px;transform:translateX(-50%);
+ padding:8px 18px;border:1px solid rgba(212,175,55,.5);border-radius:8px;
+ color:#f4df9a;background:rgba(0,0,0,.55);font:600 15px Arial;letter-spacing:1px;
+ pointer-events:none
+}
+</style>
+</head>
+<body>
+<div id="app"><div id="label" style="display:none">MẶT 6</div></div>
+
+<script type="importmap">
+{"imports":{
+"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+"three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import {RoundedBoxGeometry} from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+const app=document.getElementById('app');
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x12080a);
+scene.fog=new THREE.Fog(0x12080a,11,20);
+
+const camera=new THREE.PerspectiveCamera(35,innerWidth/innerHeight,.1,100);
+camera.position.set(3.35,5.55,8.85);
+camera.lookAt(0,1.0,0);
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.08;
+app.appendChild(renderer.domElement);
+
+// LIGHT
+scene.add(new THREE.HemisphereLight(0xffead0,0x090405,2.0));
+
+const key=new THREE.DirectionalLight(0xffe3b0,3.2);
+key.position.set(4,8,5);
+scene.add(key);
+
+const fill=new THREE.DirectionalLight(0x7b86ff,1.1);
+fill.position.set(-5,4,2);
+scene.add(fill);
+
+const rim=new THREE.PointLight(0xffa33c,2.0,12);
+rim.position.set(0,3,-3);
+scene.add(rim);
+
+// CASINO BASE
+const floorMat=new THREE.MeshStandardMaterial({
+ color:0x241014,roughness:.82,metalness:.05
+});
+const floor=new THREE.Mesh(
+ new THREE.CylinderGeometry(4.7,4.9,.18,96),
+ floorMat
+);
+floor.position.y=-.09;
+scene.add(floor);
+
+const plinth=new THREE.Mesh(
+ new THREE.CylinderGeometry(2.55,2.72,.34,96),
+ new THREE.MeshStandardMaterial({
+  color:0x080808,roughness:.28,metalness:.58
+ })
+);
+plinth.position.y=.17;
+scene.add(plinth);
+
+for(const y of [.29,.42]){
+ const ring=new THREE.Mesh(
+  new THREE.TorusGeometry(2.42,.055,16,96),
+  new THREE.MeshStandardMaterial({
+   color:0xcaa83d,roughness:.22,metalness:.9
+  })
+ );
+ ring.rotation.x=Math.PI/2;
+ ring.position.y=y;
+ scene.add(ring);
+}
+
+// ============================================================
+// XÚC XẮC — texture giữ theo file nguồn gốc người dùng gửi
+// 512x512; l/r/t/b = 140/372; pip 6 = 42px; gradient lõm.
+// ============================================================
+function createDiceFaceTexture(number){
+ const canvas=document.createElement('canvas');
+ canvas.width=canvas.height=512;
+ const ctx=canvas.getContext('2d');
+
+ const grad=ctx.createRadialGradient(256,256,50,256,256,350);
+ grad.addColorStop(0,'#ffffff');
+ grad.addColorStop(1,'#f3ebd9');
+ ctx.fillStyle=grad;
+ ctx.fillRect(0,0,512,512);
+
+ ctx.strokeStyle='#d6cbba';
+ ctx.lineWidth=16;
+ ctx.strokeRect(8,8,496,496);
+
+ const isOne=number===1;
+ const dotColor=(isOne || number===4)?'#dc2626':'#1e293b';
+ const dotRadius=isOne?75:42;
+
+ function drawDot(x,y){
+   ctx.fillStyle=dotColor;
+   ctx.beginPath();
+   ctx.arc(x,y,dotRadius,0,Math.PI*2);
+   ctx.fill();
+
+   const inner=ctx.createRadialGradient(
+     x-5,y-5,dotRadius*.2,
+     x,y,dotRadius
+   );
+   inner.addColorStop(0,'rgba(255,255,255,.3)');
+   inner.addColorStop(.8,'rgba(0,0,0,.2)');
+   inner.addColorStop(1,'rgba(0,0,0,.5)');
+
+   ctx.fillStyle=inner;
+   ctx.beginPath();
+   ctx.arc(x,y,dotRadius,0,Math.PI*2);
+   ctx.fill();
+ }
+
+ const c=256,l=140,r=372,t=140,b=372;
+
+ switch(number){
+  case 1:
+   drawDot(c,c);
+   break;
+  case 2:
+   drawDot(l,t); drawDot(r,b);
+   break;
+  case 3:
+   drawDot(l,t); drawDot(c,c); drawDot(r,b);
+   break;
+  case 4:
+   drawDot(l,t); drawDot(r,t);
+   drawDot(l,b); drawDot(r,b);
+   break;
+  case 5:
+   drawDot(l,t); drawDot(r,t);
+   drawDot(c,c);
+   drawDot(l,b); drawDot(r,b);
+   break;
+  case 6:
+   drawDot(l,t); drawDot(r,t);
+   drawDot(l,c); drawDot(r,c);
+   drawDot(l,b); drawDot(r,b);
+   break;
+ }
+
+ const tex=new THREE.CanvasTexture(canvas);
+ tex.colorSpace=THREE.SRGBColorSpace;
+ tex.anisotropy=renderer.capabilities.getMaxAnisotropy();
+ return tex;
+}
+
+// ============================================================
+// FACE PLATE
+// Tất cả 6 mặt đều có texture.
+// Vì vậy trong toàn bộ quá trình quay sẽ không xuất hiện "mặt trắng".
+// ============================================================
+function facePlate(number,axis){
+ const tex=createDiceFaceTexture(number);
+
+ const mat=new THREE.MeshStandardMaterial({
+  map:tex,
+  roughness:.44,
+  metalness:.02,
+  polygonOffset:true,
+  polygonOffsetFactor:-2,
+  polygonOffsetUnits:-2,
+  side:THREE.FrontSide
+ });
+
+ const s=1.145;
+ const gap=.010;
+
+ const m=new THREE.Mesh(
+  new THREE.PlaneGeometry(s,s),
+  mat
+ );
+
+ if(axis==='Y'){
+   m.rotation.x=-Math.PI/2;
+   m.position.y=.605+gap;
+ }
+ else if(axis==='Z'){
+   m.position.z=.605+gap;
+ }
+ else if(axis==='X'){
+   m.rotation.y=Math.PI/2;
+   m.position.x=.605+gap;
+ }
+ else if(axis==='-Y'){
+   m.rotation.x=Math.PI/2;
+   m.position.y=-.605-gap;
+ }
+ else if(axis==='-Z'){
+   m.rotation.y=Math.PI;
+   m.position.z=-.605-gap;
+ }
+ else if(axis==='-X'){
+   m.rotation.y=-Math.PI/2;
+   m.position.x=-.605-gap;
+ }
+
+ return m;
+}
+
+// ============================================================
+// DIE ROOT
+// Cao hơn mặt đế: đáy die nằm ngay trên plinth, không bị chìm.
+// ============================================================
+const dieRoot=new THREE.Group();
+dieRoot.position.set(0,1.12,0);
+scene.add(dieRoot);
+
+const bodyMat=new THREE.MeshStandardMaterial({
+ color:0xf1e8d7,
+ roughness:.36,
+ metalness:.03
+});
+
+const body=new THREE.Mesh(
+ new RoundedBoxGeometry(1.22,1.22,1.22,8,.115),
+ bodyMat
+);
+dieRoot.add(body);
+
+// FINAL ORIENTATION:
+// +Y TOP = 6
+// +Z BROAD SIDE = 5
+// +X NARROW SIDE = 3
+//
+// Các mặt còn lại cũng được gắn đầy đủ:
+// -Y=1, -Z=2, -X=4.
+// Không có bước "gán kết quả" ở cuối animation.
+dieRoot.add(facePlate(6,'Y'));
+dieRoot.add(facePlate(5,'Z'));
+dieRoot.add(facePlate(3,'X'));
+dieRoot.add(facePlate(1,'-Y'));
+dieRoot.add(facePlate(2,'-Z'));
+dieRoot.add(facePlate(4,'-X'));
+
+// ============================================================
+// CUP / SHAKER
+// Mở từ vị trí thấp, sau đó liên tục nâng lên.
+// ============================================================
+const cup=new THREE.Group();
+cup.position.set(0,.60,0);
+scene.add(cup);
+
+const cupMat=new THREE.MeshStandardMaterial({
+ color:0x080808,
+ roughness:.22,
+ metalness:.55,
+ side:THREE.DoubleSide
+});
+
+// Inverted bell
+const shell=new THREE.Mesh(
+ new THREE.CylinderGeometry(1.62,1.82,2.05,96,1,false),
+ cupMat
+);
+shell.position.y=1.025;
+cup.add(shell);
+
+// Dome closes upper end.
+const dome=new THREE.Mesh(
+ new THREE.SphereGeometry(
+  1.62,96,48,0,Math.PI*2,0,Math.PI/2
+ ),
+ cupMat
+);
+dome.position.y=2.04;
+cup.add(dome);
+
+const innerTop=new THREE.Mesh(
+ new THREE.CylinderGeometry(1.52,1.52,.10,96),
+ new THREE.MeshStandardMaterial({
+  color:0x020202,roughness:.8,metalness:.05
+ })
+);
+innerTop.position.y=2.00;
+cup.add(innerTop);
+
+for(const y of [.13,2.02]){
+ const r=new THREE.Mesh(
+  new THREE.TorusGeometry(y<1?1.82:1.58,.075,18,96),
+  new THREE.MeshStandardMaterial({
+   color:0xd4af37,roughness:.2,metalness:.9
+  })
+ );
+ r.rotation.x=Math.PI/2;
+ r.position.y=y;
+ cup.add(r);
+}
+
+const cap=new THREE.Mesh(
+ new THREE.CylinderGeometry(.42,.52,.18,64),
+ new THREE.MeshStandardMaterial({
+  color:0x111111,roughness:.22,metalness:.65
+ })
+);
+cap.position.y=2.23;
+cup.add(cap);
+
+const capRing=new THREE.Mesh(
+ new THREE.TorusGeometry(.45,.035,16,64),
+ new THREE.MeshStandardMaterial({
+  color:0xd4af37,roughness:.18,metalness:.95
+ })
+);
+capRing.rotation.x=Math.PI/2;
+capRing.position.y=2.32;
+cup.add(capRing);
+
+// ============================================================
+// CONTINUOUS PHYSICAL ANIMATION
+//
+// Không có:
+// - điểm dừng trung gian
+// - pause
+// - reset orientation
+// - "đứng lại rồi gán mặt 6"
+//
+// Điểm cuối của chính hàm chuyển động là orientation chuẩn.
+// Khi animation kết thúc, slide kết thúc ngay ở frame đó.
+// ============================================================
+const start=performance.now();
+
+// Slide dài hơn V2.
+// Tổng góc quay tăng gấp đôi để tốc độ quay ban đầu cũng tăng mạnh,
+// nhưng vẫn giảm tốc liên tục đến đúng tư thế cuối.
+const DURATION=6500;
+const label=document.getElementById('label');
+
+function easeOutQuart(t){
+    return 1-Math.pow(1-t,4);
+}
+
+function animate(now){
+    requestAnimationFrame(animate);
+
+    const t=Math.min((now-start)/DURATION,1);
+    const p=easeOutQuart(t);
+
+    // Hộp nâng liên tục, không có điểm dừng trung gian.
+    cup.position.y=.60 + 2.72*p;
+
+    // Viên xúc sắc quay liên tục và giảm tốc.
+    // Endpoint = rotation (0,0,0), tức chính tư thế kết thúc của slide.
+    const totalY=6.70*Math.PI*2;
+    const totalX=2.36*Math.PI;
+    const totalZ=1.44*Math.PI;
+
+    dieRoot.rotation.y=totalY*(1-p);
+    dieRoot.rotation.x=totalX*(1-p);
+    dieRoot.rotation.z=totalZ*(1-p);
+
+    // Dao động nhỏ cũng triệt tiêu tự nhiên về 0.
+    dieRoot.position.x=.035*(1-t)*Math.sin(totalY*(1-p));
+    dieRoot.position.z=.025*(1-t)*Math.cos(totalY*(1-p));
+
+    // Chỉ khi chuyển động thực sự chạm frame cuối mới hiện chữ.
+    if(t>=1){
+        label.style.display='block';
+    }
+
+    renderer.render(scene,camera);
+}
+
+requestAnimationFrame(animate);
+
+addEventListener('resize',()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
