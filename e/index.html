@@ -1,0 +1,794 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Cá Ngựa 3D — Offline</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#12080a;font-family:system-ui,-apple-system,sans-serif;-webkit-tap-highlight-color:transparent}
+#boardFrame{position:fixed;inset:0;border:0;width:100%;height:100%;background:#080704;z-index:1;display:none}
+#hud{position:fixed;left:0;right:0;top:0;padding:10px 14px;display:none;gap:8px;align-items:center;
+ background:linear-gradient(180deg,rgba(0,0,0,.7),transparent);pointer-events:none;z-index:5}
+.badge{pointer-events:none;padding:7px 14px;border-radius:10px;font-weight:800;font-size:14px;color:#fff;
+ border:1px solid rgba(255,255,255,.22);text-shadow:0 1px 2px #000}
+#banner{position:fixed;left:50%;top:56px;transform:translateX(-50%);z-index:5;pointer-events:none;display:none;
+ padding:8px 16px;border-radius:10px;background:rgba(0,0,0,.65);color:#fde68a;font-weight:600;font-size:13px;
+ max-width:92%;text-align:center}
+.popup-wrap{position:fixed;inset:0;display:none;place-items:center;z-index:30;background:rgba(0,0,0,.5)}
+.popup-wrap.show{display:grid}
+.popup-panel{display:flex;flex-direction:column;gap:12px;align-items:center;padding:16px;max-width:92vw}
+.popup-btn{
+  min-width:min(78vw,320px);padding:22px 28px;border:0;border-radius:20px;
+  font-size:22px;font-weight:900;letter-spacing:.5px;cursor:pointer;
+  background:linear-gradient(160deg,#fbbf24,#d97706);color:#1c1005;
+  box-shadow:0 12px 40px rgba(251,191,36,.4),0 0 0 3px rgba(253,230,138,.2);
+  -webkit-user-select:none;user-select:none;touch-action:manipulation
+}
+.popup-btn.exit{background:linear-gradient(160deg,#4ade80,#16a34a);color:#052e16;box-shadow:0 12px 40px rgba(74,222,128,.35)}
+.popup-btn.move{background:linear-gradient(160deg,#fbbf24,#d97706);color:#1c1005}
+.popup-btn.kick,.popup-btn.kick_rear{background:linear-gradient(160deg,#f87171,#dc2626);color:#450a0a;box-shadow:0 12px 40px rgba(248,113,113,.35)}
+.popup-btn.home{background:linear-gradient(160deg,#60a5fa,#2563eb);color:#082f49;box-shadow:0 12px 40px rgba(96,165,250,.35)}
+.popup-btn:active{transform:scale(.97)}
+.popup-sub{color:#fde68a;font-size:14px;font-weight:600;text-align:center;text-shadow:0 1px 3px #000}
+#slideLayer{position:fixed;inset:0;display:none;z-index:40;background:#000}
+#slideLayer.show{display:block}
+#slideFrame{position:absolute;inset:0;border:0;width:100%;height:100%}
+#setup{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+ background:#12080a;z-index:100;color:#fde68a;pointer-events:auto}
+#setup h1{margin:0 0 8px;font-size:22px;color:#f6d36a}
+#setup p{opacity:.75;margin:0 0 28px;color:#e7c56a}
+#setup .row{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;padding:0 16px}
+#setup button{
+  margin:0;padding:16px 28px;border-radius:16px;border:1px solid #d4af37;
+  background:#1a1010;color:#fde68a;font-weight:700;font-size:17px;
+  min-width:110px;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none;
+  pointer-events:auto;position:relative;z-index:101
+}
+#setup button:active{background:#2a1810;transform:scale(.97)}
+#win{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.88);z-index:60;
+ color:#fde68a;font-size:26px;font-weight:900;text-align:center;padding:24px}
+#errBox{position:fixed;left:8px;right:8px;bottom:8px;z-index:200;display:none;padding:10px;border-radius:8px;
+ background:rgba(80,0,0,.9);color:#fecaca;font-size:12px;max-height:30vh;overflow:auto}
+</style>
+</head>
+<body>
+<div id="setup">
+  <h1>Cá Ngựa 3D</h1>
+  <p>Chơi offline — chung 1 màn hình</p>
+  <div class="row">
+    <button type="button" id="btn2">2 người</button>
+    <button type="button" id="btn3">3 người</button>
+    <button type="button" id="btn4">4 người</button>
+  </div>
+</div>
+<iframe id="boardFrame" src="about:blank" allow="autoplay"></iframe>
+<div id="hud">
+  <span id="turnBadge" class="badge">—</span>
+  <span id="diceBadge" class="badge" style="background:#333">Xúc: —</span>
+</div>
+<div id="banner"></div>
+<div id="popupRoll" class="popup-wrap">
+  <div class="popup-panel">
+    <button type="button" class="popup-btn" id="btnRoll">LẮC</button>
+    <div class="popup-sub" id="rollSub">Chạm để lắc xúc xắc</div>
+  </div>
+</div>
+<div id="popupAction" class="popup-wrap">
+  <div class="popup-panel" id="actionPanel"></div>
+</div>
+<div id="slideLayer"><iframe id="slideFrame" src="about:blank" allow="autoplay"></iframe></div>
+<div id="win"></div>
+<div id="errBox"></div>
+<script>
+/**
+ * board-data.js — Toạ độ logic bàn Cá Ngựa 3D
+ * Grid 40×40, tâm (20,20). Nhìn từ trên: +X phải, +Y lên. Hướng chạy: ngược chiều kim đồng hồ.
+ */
+(function (global) {
+  'use strict';
+
+  const COLORS = [
+    { id: 0, key: 'black', name: 'Đen',  hex: 0x1a1a1a, css: '#1a1a1a', pen: { x0: 0, y0: 0 }, heading: 90 },
+    { id: 1, key: 'ivory', name: 'Ngà',  hex: 0xe8e0c8, css: '#e8e0c8', pen: { x0: 26, y0: 26 }, heading: -90 },
+    { id: 2, key: 'red',   name: 'Đỏ',   hex: 0xdc2626, css: '#dc2626', pen: { x0: 26, y0: 0 }, heading: 180 },
+    { id: 3, key: 'blue',  name: 'Xanh', hex: 0x1e6fff, css: '#1e6fff', pen: { x0: 0, y0: 26 }, heading: 0 }
+  ];
+
+  /** Ô xuất phát (đáy-trái mỗi chuồng trên path) */
+  const START = {
+    0: { gx: 1, gy: 16 },   // Đen
+    1: { gx: 39, gy: 24 },  // Ngà
+    2: { gx: 24, gy: 1 },   // Đỏ
+    3: { gx: 16, gy: 39 }   // Xanh
+  };
+
+  /** Ô lên chuồng (mũi tên) — ô cuối path trước khi vào home */
+  const ENTRY = {
+    0: { gx: 1, gy: 20 },
+    1: { gx: 39, gy: 20 },
+    2: { gx: 20, gy: 1 },
+    3: { gx: 20, gy: 39 }
+  };
+
+  /** Home 1→6 (index 0 = ô 1) */
+  const HOME = {
+    0: [ // Đen — phải → tâm
+      { gx: 4, gy: 20 }, { gx: 6.8, gy: 20 }, { gx: 9.6, gy: 20 },
+      { gx: 12.4, gy: 20 }, { gx: 15.2, gy: 20 }, { gx: 18, gy: 20 }
+    ],
+    1: [ // Ngà — trái → tâm
+      { gx: 36, gy: 20 }, { gx: 33.2, gy: 20 }, { gx: 30.4, gy: 20 },
+      { gx: 27.6, gy: 20 }, { gx: 24.8, gy: 20 }, { gx: 22, gy: 20 }
+    ],
+    2: [ // Đỏ — lên → tâm
+      { gx: 20, gy: 4 }, { gx: 20, gy: 6.8 }, { gx: 20, gy: 9.6 },
+      { gx: 20, gy: 12.4 }, { gx: 20, gy: 15.2 }, { gx: 20, gy: 18 }
+    ],
+    3: [ // Xanh — xuống → tâm
+      { gx: 20, gy: 36 }, { gx: 20, gy: 33.2 }, { gx: 20, gy: 30.4 },
+      { gx: 20, gy: 27.6 }, { gx: 20, gy: 24.8 }, { gx: 20, gy: 22 }
+    ]
+  };
+
+  /**
+   * PATH[colorId]: 48 ô, index 0 = START, index 47 = ENTRY.
+   * Đi ngược chiều kim đồng hồ.
+   */
+  const PATH = {
+    2: [ // Đỏ — 56 ô, START→ENTRY; 13 nút quanh chuồng
+      [24,1],[24,3.5],[24,6],[24,8.5],[24,11],[24,13.5],[24,16],
+      [26.5,16],[29,16],[31.5,16],[34,16],[36.5,16],[39,16],
+      [39,20],[39,24],
+      [36.5,24],[34,24],[31.5,24],[29,24],[26.5,24],[24,24],
+      [24,26.5],[24,29],[24,31.5],[24,34],[24,36.5],[24,39],
+      [20,39],[16,39],
+      [16,36.5],[16,34],[16,31.5],[16,29],[16,26.5],[16,24],
+      [13.5,24],[11,24],[8.5,24],[6,24],[3.5,24],[1,24],
+      [1,20],[1,16],
+      [3.5,16],[6,16],[8.5,16],[11,16],[13.5,16],[16,16],
+      [16,13.5],[16,11],[16,8.5],[16,6],[16,3.5],[16,1],[20,1]
+    ],
+    1: [ // Ngà
+      [39,24],[36.5,24],[34,24],[31.5,24],[29,24],[26.5,24],[24,24],
+      [24,26.5],[24,29],[24,31.5],[24,34],[24,36.5],[24,39],
+      [20,39],[16,39],
+      [16,36.5],[16,34],[16,31.5],[16,29],[16,26.5],[16,24],
+      [13.5,24],[11,24],[8.5,24],[6,24],[3.5,24],[1,24],
+      [1,20],[1,16],
+      [3.5,16],[6,16],[8.5,16],[11,16],[13.5,16],[16,16],
+      [16,13.5],[16,11],[16,8.5],[16,6],[16,3.5],[16,1],
+      [20,1],[24,1],
+      [24,3.5],[24,6],[24,8.5],[24,11],[24,13.5],[24,16],
+      [26.5,16],[29,16],[31.5,16],[34,16],[36.5,16],[39,16],[39,20]
+    ],
+    3: [ // Xanh
+      [16,39],[16,36.5],[16,34],[16,31.5],[16,29],[16,26.5],[16,24],
+      [13.5,24],[11,24],[8.5,24],[6,24],[3.5,24],[1,24],
+      [1,20],[1,16],
+      [3.5,16],[6,16],[8.5,16],[11,16],[13.5,16],[16,16],
+      [16,13.5],[16,11],[16,8.5],[16,6],[16,3.5],[16,1],
+      [20,1],[24,1],
+      [24,3.5],[24,6],[24,8.5],[24,11],[24,13.5],[24,16],
+      [26.5,16],[29,16],[31.5,16],[34,16],[36.5,16],[39,16],
+      [39,20],[39,24],
+      [36.5,24],[34,24],[31.5,24],[29,24],[26.5,24],[24,24],
+      [24,26.5],[24,29],[24,31.5],[24,34],[24,36.5],[24,39],[20,39]
+    ],
+    0: [ // Đen
+      [1,16],[3.5,16],[6,16],[8.5,16],[11,16],[13.5,16],[16,16],
+      [16,13.5],[16,11],[16,8.5],[16,6],[16,3.5],[16,1],
+      [20,1],[24,1],
+      [24,3.5],[24,6],[24,8.5],[24,11],[24,13.5],[24,16],
+      [26.5,16],[29,16],[31.5,16],[34,16],[36.5,16],[39,16],
+      [39,20],[39,24],
+      [36.5,24],[34,24],[31.5,24],[29,24],[26.5,24],[24,24],
+      [24,26.5],[24,29],[24,31.5],[24,34],[24,36.5],[24,39],
+      [20,39],[16,39],
+      [16,36.5],[16,34],[16,31.5],[16,29],[16,26.5],[16,24],
+      [13.5,24],[11,24],[8.5,24],[6,24],[3.5,24],[1,24],[1,20]
+    ]
+  };
+
+  /** 4 vị trí ban đầu trong chuồng (grid) */
+  function penSlots(colorId) {
+    const p = COLORS[colorId].pen;
+    return [
+      { gx: p.x0 + 4, gy: p.y0 + 4 },
+      { gx: p.x0 + 4, gy: p.y0 + 10 },
+      { gx: p.x0 + 10, gy: p.y0 + 4 },
+      { gx: p.x0 + 10, gy: p.y0 + 10 }
+    ];
+  }
+
+  function pathLen(colorId) {
+    return PATH[colorId].length; // 48
+  }
+
+  function cellAt(colorId, pathIndex) {
+    const p = PATH[colorId][pathIndex];
+    return p ? { gx: p[0], gy: p[1] } : null;
+  }
+
+  function homeCell(colorId, homeIndex1to6) {
+    return HOME[colorId][homeIndex1to6 - 1] || null;
+  }
+
+  global.BoardData = {
+    COLORS, START, ENTRY, HOME, PATH,
+    penSlots, pathLen, cellAt, homeCell
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/**
+ * rules.js — Luật Cá Ngựa (1 xúc xắc, xuất = 6)
+ * - Không được nhảy cách qua nút xuất quân (START của bất kỳ màu)
+ * - Đá hậu: xúc 1 + đối phương ngay ô phía sau → đá về chuồng (trình diễn như đá quân)
+ */
+(function (global) {
+  'use strict';
+  const BD = () => global.BoardData;
+
+  function createHorseState(colorId, slotIndex) {
+    const slot = BD().penSlots(colorId)[slotIndex];
+    return {
+      id: colorId * 4 + slotIndex,
+      colorId,
+      slotIndex,
+      zone: 'pen',
+      pathIndex: -1,
+      homeIndex: 0,
+      gx: slot.gx,
+      gy: slot.gy
+    };
+  }
+
+  function createGameState(numPlayers) {
+    const n = Math.max(2, Math.min(4, numPlayers || 4));
+    const order = [2, 3, 1, 0].slice(0, n);
+    const horses = [];
+    order.forEach((cid) => {
+      for (let s = 0; s < 4; s++) horses.push(createHorseState(cid, s));
+    });
+    return {
+      players: order.map((cid, i) => ({
+        colorId: cid,
+        name: BD().COLORS[cid].name,
+        index: i
+      })),
+      horses,
+      current: 0,
+      dice: 0,
+      phase: 'turn',
+      winner: null,
+      extraTurn: false
+    };
+  }
+
+  function horsesOf(state, colorId) {
+    return state.horses.filter((h) => h.colorId === colorId);
+  }
+
+  function occupantAt(state, gx, gy, exceptId) {
+    const eps = 0.2;
+    return state.horses.find(
+      (h) =>
+        h.id !== exceptId &&
+        h.zone !== 'pen' &&
+        h.zone !== 'done' &&
+        Math.abs(h.gx - gx) < eps &&
+        Math.abs(h.gy - gy) < eps
+    );
+  }
+
+  function isStartCell(gx, gy) {
+    const eps = 0.2;
+    const S = BD().START;
+    for (const k of Object.keys(S)) {
+      const s = S[k];
+      if (Math.abs(s.gx - gx) < eps && Math.abs(s.gy - gy) < eps) return true;
+    }
+    return false;
+  }
+
+  function pathCellsBetween(colorId, fromIdx, toIdx) {
+    const cells = [];
+    for (let i = fromIdx + 1; i <= toIdx; i++) {
+      const c = BD().cellAt(colorId, i);
+      if (c) cells.push({ gx: c.gx, gy: c.gy });
+    }
+    return cells;
+  }
+
+  /** Có bị chắn giữa (quân hoặc nút xuất quân) không — không tính ô đích */
+  function blockedBetween(state, horse, fromIdx, toIdx) {
+    for (let i = fromIdx + 1; i < toIdx; i++) {
+      const c = BD().cellAt(horse.colorId, i);
+      if (!c) continue;
+      if (isStartCell(c.gx, c.gy)) return true; // không nhảy cách qua nút xuất quân
+      if (occupantAt(state, c.gx, c.gy, horse.id)) return true;
+    }
+    return false;
+  }
+
+  function movesForHorse(state, horse, dice) {
+    const moves = [];
+    if (!horse || dice < 1 || dice > 6) return moves;
+
+    // —— Xuất quân ——
+    if (horse.zone === 'pen') {
+      if (dice === 6) {
+        const st = BD().START[horse.colorId];
+        const occ = occupantAt(state, st.gx, st.gy, horse.id);
+        if (!(occ && occ.colorId === horse.colorId)) {
+          moves.push({
+            type: 'exit',
+            horseId: horse.id,
+            horseSlot: horse.slotIndex,
+            toGx: st.gx,
+            toGy: st.gy,
+            pathIndex: 0,
+            steps: 1,
+            cells: [{ gx: st.gx, gy: st.gy }],
+            kickId: occ && occ.colorId !== horse.colorId ? occ.id : null
+          });
+        }
+      }
+      return moves;
+    }
+
+    // —— Đá hậu: xúc 1 + đối phương ngay ô phía sau trên path ——
+    if (horse.zone === 'track' && dice === 1 && horse.pathIndex > 0) {
+      const behind = BD().cellAt(horse.colorId, horse.pathIndex - 1);
+      if (behind) {
+        const occ = occupantAt(state, behind.gx, behind.gy, horse.id);
+        if (occ && occ.colorId !== horse.colorId) {
+          moves.push({
+            type: 'kick_rear',
+            horseId: horse.id,
+            horseSlot: horse.slotIndex,
+            toGx: horse.gx,
+            toGy: horse.gy,
+            pathIndex: horse.pathIndex,
+            steps: 0,
+            cells: [],
+            kickId: occ.id
+          });
+        }
+      }
+    }
+
+    // —— Trên đường ——
+    if (horse.zone === 'track') {
+      const len = BD().pathLen(horse.colorId);
+      const dest = horse.pathIndex + dice;
+
+      if (dest < len) {
+        if (blockedBetween(state, horse, horse.pathIndex, dest)) return moves;
+        const cell = BD().cellAt(horse.colorId, dest);
+        const occ = occupantAt(state, cell.gx, cell.gy, horse.id);
+        if (occ && occ.colorId === horse.colorId) return moves;
+        moves.push({
+          type: occ ? 'kick' : 'move',
+          horseId: horse.id,
+          horseSlot: horse.slotIndex,
+          toGx: cell.gx,
+          toGy: cell.gy,
+          pathIndex: dest,
+          steps: dice,
+          cells: pathCellsBetween(horse.colorId, horse.pathIndex, dest),
+          kickId: occ ? occ.id : null
+        });
+      } else {
+        const toEntry = len - 1 - horse.pathIndex;
+        const intoHome = dice - toEntry;
+        if (intoHome >= 1 && intoHome <= 6) {
+          if (blockedBetween(state, horse, horse.pathIndex, len - 1)) return moves;
+          const cell = BD().homeCell(horse.colorId, intoHome);
+          if (cell && !occupantAt(state, cell.gx, cell.gy, horse.id)) {
+            const cells = pathCellsBetween(horse.colorId, horse.pathIndex, len - 1);
+            cells.push({ gx: cell.gx, gy: cell.gy });
+            moves.push({
+              type: 'home',
+              horseId: horse.id,
+              horseSlot: horse.slotIndex,
+              toGx: cell.gx,
+              toGy: cell.gy,
+              homeIndex: intoHome,
+              steps: cells.length,
+              cells,
+              kickId: null
+            });
+          }
+        }
+      }
+      return moves;
+    }
+
+    if (horse.zone === 'home' && dice === 1 && horse.homeIndex < 6) {
+      const next = horse.homeIndex + 1;
+      const cell = BD().homeCell(horse.colorId, next);
+      if (cell && !occupantAt(state, cell.gx, cell.gy, horse.id)) {
+        moves.push({
+          type: 'home',
+          horseId: horse.id,
+          horseSlot: horse.slotIndex,
+          toGx: cell.gx,
+          toGy: cell.gy,
+          homeIndex: next,
+          steps: 1,
+          cells: [{ gx: cell.gx, gy: cell.gy }],
+          kickId: null
+        });
+      }
+    }
+    return moves;
+  }
+
+  function legalMoves(state, dice) {
+    const pl = state.players[state.current];
+    const list = [];
+    horsesOf(state, pl.colorId).forEach((h) => {
+      movesForHorse(state, h, dice).forEach((m) => list.push(m));
+    });
+    return list;
+  }
+
+  function applyMove(state, move) {
+    const horse = state.horses.find((h) => h.id === move.horseId);
+    if (!horse) return state;
+
+    if (move.kickId != null) {
+      const victim = state.horses.find((h) => h.id === move.kickId);
+      if (victim) {
+        const slot = BD().penSlots(victim.colorId)[victim.slotIndex];
+        victim.zone = 'pen';
+        victim.pathIndex = -1;
+        victim.homeIndex = 0;
+        victim.gx = slot.gx;
+        victim.gy = slot.gy;
+      }
+    }
+
+    if (move.type === 'kick_rear') {
+      // đứng yên, chỉ đá
+      if (state.dice === 6) state.extraTurn = true;
+      return state;
+    }
+
+    if (move.type === 'exit') {
+      horse.zone = 'track';
+      horse.pathIndex = 0;
+      horse.homeIndex = 0;
+      horse.gx = move.toGx;
+      horse.gy = move.toGy;
+      state.extraTurn = true;
+    } else if (move.type === 'move' || move.type === 'kick') {
+      horse.zone = 'track';
+      horse.pathIndex = move.pathIndex;
+      horse.gx = move.toGx;
+      horse.gy = move.toGy;
+    } else if (move.type === 'home') {
+      horse.zone = 'home';
+      horse.pathIndex = -1;
+      horse.homeIndex = move.homeIndex;
+      horse.gx = move.toGx;
+      horse.gy = move.toGy;
+    }
+
+    if (state.dice === 6) state.extraTurn = true;
+    checkWin(state, horse.colorId);
+    return state;
+  }
+
+  function checkWin(state, colorId) {
+    const hs = horsesOf(state, colorId);
+    const idx = new Set(
+      hs.filter((h) => h.zone === 'home' && h.homeIndex >= 3 && h.homeIndex <= 6).map((h) => h.homeIndex)
+    );
+    if (idx.has(6) && idx.has(5) && idx.has(4) && idx.has(3)) {
+      state.winner = colorId;
+      state.phase = 'win';
+    }
+  }
+
+  function nextPlayer(state) {
+    if (state.winner != null) return state;
+    if (state.extraTurn) {
+      state.extraTurn = false;
+      state.phase = 'turn';
+      state.dice = 0;
+      return state;
+    }
+    state.current = (state.current + 1) % state.players.length;
+    state.phase = 'turn';
+    state.dice = 0;
+    return state;
+  }
+
+  global.Rules = {
+    createGameState,
+    horsesOf,
+    legalMoves,
+    movesForHorse,
+    applyMove,
+    nextPlayer
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+(function () {
+  function showErr(msg) {
+    var el = document.getElementById("errBox");
+    el.style.display = "block";
+    el.textContent = String(msg);
+  }
+  window.onerror = function (m, s, l) { showErr(m + " @" + l); };
+  if (!window.BoardData || !window.Rules) { showErr("Data/Rules không load"); return; }
+
+  var boardFrame = document.getElementById("boardFrame");
+  var popupRoll = document.getElementById("popupRoll");
+  var popupAction = document.getElementById("popupAction");
+  var actionPanel = document.getElementById("actionPanel");
+  var btnRoll = document.getElementById("btnRoll");
+  var rollSub = document.getElementById("rollSub");
+  var slideLayer = document.getElementById("slideLayer");
+  var slideFrame = document.getElementById("slideFrame");
+  var turnBadge = document.getElementById("turnBadge");
+  var diceBadge = document.getElementById("diceBadge");
+  var banner = document.getElementById("banner");
+  var hud = document.getElementById("hud");
+  var setup = document.getElementById("setup");
+
+  var sfxShake = new Audio("a3a.mp3"); sfxShake.preload = "auto";
+  var sfxOpen = new Audio("a3b.mp3"); sfxOpen.preload = "auto";
+  function playSfx(a) {
+    try { a.pause(); a.currentTime = 0; var p = a.play(); if (p && p.catch) p.catch(function(){}); } catch (e) {}
+  }
+
+  var state = null, filteredMoves = [], busy = false;
+
+  function boardAPI() {
+    try { return boardFrame.contentWindow && boardFrame.contentWindow.BoardAPI; } catch (e) { return null; }
+  }
+  function colorCss(cid) { return BoardData.COLORS[cid].css; }
+  function wait(ms) { return new Promise(function(r){ setTimeout(r, ms); }); }
+
+  function styleRollBtn(pl) {
+    var hex = colorCss(pl.colorId);
+    btnRoll.style.background = "linear-gradient(160deg," + hex + ",#0a0a0a)";
+    btnRoll.style.color = (pl.colorId === 1) ? "#111" : "#fff";
+    btnRoll.style.boxShadow = "0 12px 36px " + hex + "99,0 0 0 3px rgba(253,230,138,.3)";
+  }
+
+  function refreshHud() {
+    if (!state) return;
+    var pl = state.players[state.current];
+    turnBadge.textContent = "Lượt: " + pl.name;
+    turnBadge.style.background = colorCss(pl.colorId);
+    diceBadge.textContent = state.dice ? ("Xúc: " + state.dice) : "Xúc: —";
+    banner.style.display = "block";
+    styleRollBtn(pl);
+    if (state.phase === "turn") {
+      banner.textContent = pl.name + " — chạm LẮC";
+      rollSub.textContent = pl.name + "  ·  chạm để lắc";
+    }
+  }
+
+  function showRoll(v) { popupRoll.classList.toggle("show", !!v); }
+  function showAction(v) { popupAction.classList.toggle("show", !!v); }
+
+  async function runDiceSlides(dice) {
+    playSfx(sfxShake);
+    slideLayer.classList.add("show");
+    slideFrame.src = "Lac_hop.html";
+    await wait(2500);
+    playSfx(sfxOpen);
+    slideFrame.src = "Mat_" + dice + ".html";
+    await wait(6800);
+    slideLayer.classList.remove("show");
+    slideFrame.src = "about:blank";
+  }
+
+  function syncBoard() {
+    var api = boardAPI();
+    if (!api) return;
+    api.enableGameMode(true);
+    api.syncState({
+      horses: state.horses.map(function(h) {
+        return { id: h.id, gx: h.gx, gy: h.gy, colorId: h.colorId, slotIndex: h.slotIndex, zone: h.zone };
+      })
+    });
+  }
+
+  var TYPE_LABEL = {
+    exit: "XUẤT QUÂN", move: "DI CHUYỂN", kick: "ĐÁ QUÂN",
+    kick_rear: "ĐÁ HẬU", home: "LÊN CHUỒNG"
+  };
+
+  function groupTypes(moves) {
+    var map = {};
+    moves.forEach(function(m) {
+      var t = m.type;
+      if (!map[t]) map[t] = [];
+      map[t].push(m);
+    });
+    return map;
+  }
+
+  function openActionPopup(moves) {
+    var groups = groupTypes(moves);
+    actionPanel.innerHTML = "";
+    var title = document.createElement("div");
+    title.className = "popup-sub";
+    title.textContent = "Xúc " + state.dice + " — chọn hành động";
+    actionPanel.appendChild(title);
+    Object.keys(groups).forEach(function(t) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "popup-btn " + t;
+      btn.textContent = TYPE_LABEL[t] || t;
+      function go(e) { e.preventDefault(); onPickType(t, groups[t]); }
+      btn.addEventListener("click", go);
+      btn.addEventListener("touchend", go, { passive: false });
+      actionPanel.appendChild(btn);
+    });
+    showAction(true);
+  }
+
+  function onPickType(type, movesOfType) {
+    showAction(false);
+    filteredMoves = movesOfType;
+    var api = boardAPI();
+    var pl = state.players[state.current];
+
+    if (type === "exit") {
+      banner.textContent = "Chạm quân trong chuồng để xuất";
+      if (api) {
+        api.cameraToPen(pl.colorId);
+        api.setHorseBlink(movesOfType.map(function(m){ return m.horseId; }));
+      }
+      state.phase = "pick-horse";
+      return;
+    }
+
+    banner.textContent = (type === "kick" || type === "kick_rear")
+      ? "Chạm quân để đá" : "Chạm quân có thể đi";
+    if (api) {
+      api.cameraTopDown();
+      var ids = [], cells = [];
+      movesOfType.forEach(function(m) {
+        if (ids.indexOf(m.horseId) < 0) ids.push(m.horseId);
+        if (m.cells && m.cells.length) cells.push({ gx: m.toGx, gy: m.toGy });
+        else cells.push({ gx: m.toGx, gy: m.toGy });
+      });
+      api.setHorseBlink(ids);
+      api.showTargetMarkers(cells);
+    }
+    state.phase = "pick-horse";
+  }
+
+  async function onHorsePicked(logicId) {
+    if (state.phase !== "pick-horse" || busy) return;
+    var moves = filteredMoves.filter(function(m){ return m.horseId === logicId; });
+    if (!moves.length) return;
+    var move = moves.find(function(m){ return m.type === "kick" || m.type === "kick_rear"; }) || moves[0];
+    await executeMove(move);
+  }
+
+  async function executeMove(move) {
+    if (busy) return;
+    busy = true;
+    state.phase = "anim";
+    banner.textContent = "Đang trình diễn…";
+    var api = boardAPI();
+    if (api) { api.clearBlink(); api.clearChoices(); api.showTargetMarkers([]); }
+
+    var kickId = move.kickId;
+
+    if (api && move.cells && move.cells.length) {
+      await api.playSteps(move.horseId, move.cells);
+    }
+
+    Rules.applyMove(state, move);
+
+    if (kickId != null && api) {
+      var v = state.horses.find(function(h){ return h.id === kickId; });
+      if (v) await api.playKickReturn(v.id, v.gx, v.gy);
+    }
+
+    syncBoard();
+    if (api) api.cameraDefault();
+
+    if (state.winner != null) {
+      document.getElementById("win").style.display = "grid";
+      document.getElementById("win").textContent = "🏆 " + BoardData.COLORS[state.winner].name + " thắng!";
+      busy = false;
+      return;
+    }
+
+    Rules.nextPlayer(state);
+    state.phase = "turn";
+    busy = false;
+    refreshHud();
+    showRoll(true);
+  }
+
+  async function onRoll() {
+    if (!state || state.phase !== "turn" || busy) return;
+    busy = true;
+    showRoll(false);
+    var dice = 1 + Math.floor(Math.random() * 6);
+    state.dice = dice;
+    state.phase = "reveal";
+    refreshHud();
+    try { await runDiceSlides(dice); } catch (e) { showErr("Slide: " + e); }
+
+    var moves = Rules.legalMoves(state, dice);
+    diceBadge.textContent = "Xúc: " + dice;
+    if (!moves.length) {
+      banner.textContent = "Không có nước đi — bỏ lượt";
+      await wait(1000);
+      Rules.nextPlayer(state);
+      state.phase = "turn";
+      busy = false;
+      refreshHud();
+      showRoll(true);
+      return;
+    }
+    busy = false;
+    state.phase = "pick-action";
+    banner.textContent = "Chọn hành động";
+    openActionPopup(moves);
+  }
+
+  function bindTap(el, fn) {
+    if (!el) return;
+    var locked = false;
+    function fire(e) {
+      if (locked) return;
+      locked = true;
+      try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
+      try { fn(e); } catch (err) { showErr(err); }
+      setTimeout(function(){ locked = false; }, 400);
+    }
+    el.addEventListener("click", fire, false);
+    el.addEventListener("touchend", fire, { passive: false });
+  }
+
+  bindTap(btnRoll, onRoll);
+
+  window.addEventListener("message", function(ev) {
+    var d = ev.data;
+    if (!d || typeof d !== "object") return;
+    if (d.type === "board-ready" && state) syncBoard();
+    if (d.type === "board-choice" && d.move) executeMove(d.move);
+    if (d.type === "board-horse" && d.logicId != null) onHorsePicked(d.logicId);
+  });
+
+  function startGame(n) {
+    try {
+      state = Rules.createGameState(n);
+      setup.style.display = "none";
+      hud.style.display = "flex";
+      banner.style.display = "block";
+      boardFrame.style.display = "block";
+      boardFrame.src = "board.html";
+      refreshHud();
+      showRoll(true);
+      var tries = 0;
+      (function trySync() {
+        tries++;
+        if (boardAPI()) { syncBoard(); return; }
+        if (tries < 50) setTimeout(trySync, 200);
+      })();
+    } catch (e) { showErr("startGame: " + e); }
+  }
+
+  bindTap(document.getElementById("btn2"), function(){ startGame(2); });
+  bindTap(document.getElementById("btn3"), function(){ startGame(3); });
+  bindTap(document.getElementById("btn4"), function(){ startGame(4); });
+})();
+</script>
+</body>
+</html>
