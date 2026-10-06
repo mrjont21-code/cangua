@@ -1,0 +1,396 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Cá Ngựa 3D 40x40</title><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080704}canvas{display:block;width:100%;height:100%;touch-action:none}#err{position:fixed;inset:0;display:none;place-items:center;color:#ffd76a;background:#080704;font:16px sans-serif;padding:30px;text-align:center}</style></head><body><div id="err"></div><script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script><script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script><script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FontLoader.js"></script><script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/TextGeometry.js"></script><script>
+if(!window.THREE){document.getElementById('err').style.display='grid';document.getElementById('err').textContent='Không tải được Three.js. Hãy kiểm tra Internet.';throw Error('THREE');}
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x080704);
+const camera=new THREE.PerspectiveCamera(38,innerWidth/innerHeight,.1,200);camera.position.set(0,31,29);camera.lookAt(0,0,0);
+const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.shadowMap.enabled=true;renderer.outputEncoding=THREE.sRGBEncoding;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.1;document.body.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xfff2c4,0x261400,1.25));const sun=new THREE.DirectionalLight(0xffffff,2.1);sun.position.set(-14,28,18);sun.castShadow=true;scene.add(sun);const warm=new THREE.PointLight(0xffb300,1.5,60);warm.position.set(18,14,-14);scene.add(warm);
+const GRID=40,W=28,S=W/GRID;function P(x,y,h=0){return new THREE.Vector3((x-20)*S,h,(20-y)*S)}
+// bàn chính xác 40x40 logic
+const boardMat=new THREE.MeshPhysicalMaterial({color:0xc99716,metalness:.9,roughness:.23,clearcoat:1,clearcoatRoughness:.12});const board=new THREE.Mesh(new THREE.BoxGeometry(W,.75,W),boardMat);board.position.y=-.42;board.receiveShadow=true;scene.add(board);
+// module nút lõm: đường kính logic 2
+const rimMat=new THREE.MeshStandardMaterial({color:0xf6d36a,metalness:1,roughness:.16});const dishMat=new THREE.MeshPhysicalMaterial({color:0xa9780b,metalness:.85,roughness:.3,clearcoat:.35});const rimGeo=new THREE.TorusGeometry(S*.98,S*.10,14,36);rimGeo.rotateX(Math.PI/2);const dishGeo=new THREE.CylinderGeometry(S*.83,S*.94,S*.10,36);
+// Vật liệu đường đi quanh từng chuồng — cùng vật liệu với chuồng tương ứng.
+const pathFireMat=new THREE.MeshPhysicalMaterial({color:0x05070a,metalness:.30,roughness:.055,clearcoat:1,clearcoatRoughness:.045,reflectivity:1});
+const pathMetalMat=new THREE.MeshPhysicalMaterial({color:0xf5f0df,metalness:.03,roughness:.10,clearcoat:.75,clearcoatRoughness:.08});
+const pathWaterMat=new THREE.MeshPhysicalMaterial({color:0xff0000,metalness:.05,roughness:.30,clearcoat:.35,clearcoatRoughness:.15});
+const pathEarthMat=new THREE.MeshPhysicalMaterial({color:0x0055ff,metalness:.05,roughness:.30,clearcoat:.35,clearcoatRoughness:.15});
+function pathMatFor(x,y){
+  // Ba cạnh đường đi bao quanh mỗi chuồng 14×14.
+  if(x<20 && y<20 && (x>=16 || y>=16)) return pathFireMat;   // Lửa
+  if(x<20 && y>20 && (x>=16 || y<=24)) return pathEarthMat;  // Thổ
+  if(x>20 && y>20 && (x<=24 || y<=24)) return pathMetalMat;  // Kim
+  if(x>20 && y<20 && (x<=24 || y>=16)) return pathWaterMat;  // Nước
+  return null;
+}
+function slot(x,y){
+  const g=new THREE.Group(),p=P(x,y,.015);
+  g.position.copy(p);
+  const pm=pathMatFor(x,y);
+  const r=new THREE.Mesh(rimGeo,pm||rimMat);
+  r.position.y=-.005;
+  g.add(r);
+  const d=new THREE.Mesh(dishGeo,pm||dishMat);
+  d.position.y=.002;
+  g.add(d);
+  scene.add(g);
+}
+// Mỗi cạnh khung lên chuồng: giữ 2 đầu + thêm 4 nút ở giữa, cách đều
+// Tọa độ nút lấy trực tiếp từ HTML 2D chuẩn
+function linePoints(x1,y1,x2,y2){let a=[];for(let i=0;i<6;i++){let t=i/5;a.push([x1+(x2-x1)*t,y1+(y2-y1)*t])}return a}
+function rot(x,y,a){let dx=x-20,dy=y-20,r=a*Math.PI/180;return [20+dx*Math.cos(r)-dy*Math.sin(r),20+dx*Math.sin(r)+dy*Math.cos(r)]}
+let base=[...linePoints(16,1,16,16),...linePoints(20,4,20,18),...linePoints(24,1,24,16),[20,1]];let pts=[];[0,90,180,270].forEach(a=>base.forEach(q=>pts.push(rot(q[0],q[1],a))));
+// loại trùng tọa độ nhưng không thay đổi vị trí
+// 4 màu người chơi, theo đúng 4 ô 14×14:
+// aidx 0 = xanh (dưới trái)
+// aidx 1 = trắng/ivory (trên trái)
+// aidx 2 = vàng (trên phải)
+// aidx 3 = đỏ (dưới phải)
+const ivoryMats=[
+  {rim:new THREE.MeshStandardMaterial({color:0x245b8f,metalness:.35,roughness:.28}),dish:new THREE.MeshPhysicalMaterial({color:0x123b68,metalness:.18,roughness:.34,clearcoat:.25})},
+  {rim:new THREE.MeshStandardMaterial({color:0xf5f0df,metalness:.35,roughness:.28}),dish:new THREE.MeshPhysicalMaterial({color:0xe9e1c9,metalness:.18,roughness:.34,clearcoat:.25})},
+  {rim:new THREE.MeshStandardMaterial({color:0xf0b900,metalness:.35,roughness:.28}),dish:new THREE.MeshPhysicalMaterial({color:0xb87a00,metalness:.18,roughness:.34,clearcoat:.25})},
+  {rim:new THREE.MeshStandardMaterial({color:0x9b1c1c,metalness:.35,roughness:.28}),dish:new THREE.MeshPhysicalMaterial({color:0x6e0f12,metalness:.18,roughness:.34,clearcoat:.25})}
+];
+function ivoryCenterSlot(x,y,mi){const g=new THREE.Group(),p=P(x,y,.015);g.position.copy(p);const r=new THREE.Mesh(rimGeo,rimMat);r.position.y=-.005;g.add(r);const d=new THREE.Mesh(dishGeo,ivoryMats[mi].dish);d.position.y=.002;g.add(d);scene.add(g)}
+function createGoldNumberTexture(num){const c=document.createElement('canvas');c.width=128;c.height=128;const x=c.getContext('2d');x.clearRect(0,0,128,128);x.font='bold 82px Arial';x.textAlign='center';x.textBaseline='middle';x.shadowColor='rgba(0,0,0,.9)';x.shadowBlur=7;x.shadowOffsetY=3;const gr=x.createLinearGradient(30,20,100,110);gr.addColorStop(0,'#fff7a8');gr.addColorStop(.28,'#ffd84a');gr.addColorStop(.55,'#c98a00');gr.addColorStop(.78,'#ffe77a');gr.addColorStop(1,'#a96800');x.fillStyle=gr;x.fillText(String(num),64,66);x.shadowColor='transparent';x.lineWidth=2;x.strokeStyle='#fff0a0';x.strokeText(String(num),64,66);return new THREE.CanvasTexture(c)}
+const goldNumberTextures=[1,2,3,4,5,6].map(createGoldNumberTexture);
+function addGoldNumber(g,num){const mat=new THREE.SpriteMaterial({map:goldNumberTextures[num-1],transparent:true,depthWrite:false});const sp=new THREE.Sprite(mat);sp.scale.set(S*1.3333333333,S*1.3333333333,1);sp.position.y=.012;g.add(sp)}
+
+// Số 1→6 của 4 khung chữ thập: chữ nổi 3D, nằm phẳng trên mặt bàn cờ.
+// Chiều cao chữ = 3/4 đường kính nút (đường kính nút ≈ 2*S).
+// Số 1 ở phía gần mép bàn cờ; số 6 ở phía gần tâm. Thứ tự vị trí không thay đổi.
+const RAISED_TEXT_SIZE=S*1.5;
+const RAISED_TEXT_DEPTH=.055;
+// Lấy hàng số trên nền ĐỎ làm chuẩn: chữ TRẮNG. Xoay 90° theo thứ tự 3 lần: // đỏ -> trắng ngà -> xanh da trời -> đen. // Màu chữ tương phản tương ứng: trắng -> đen -> trắng -> trắng.
+const raisedTextColors=[0xffffff,0x171717,0xffffff,0xffffff];
+let raisedFont=null;
+const raisedTextQueue=[];
+function addRaisedNumber(g,num,frameIndex){
+  if(!raisedFont){raisedTextQueue.push([g,num,frameIndex]);return;}
+  const geom=new THREE.TextGeometry(String(num),{
+    font:raisedFont,
+    size:RAISED_TEXT_SIZE,
+    height:RAISED_TEXT_DEPTH,
+    curveSegments:8,
+    bevelEnabled:true,
+    bevelThickness:.018,
+    bevelSize:.012,
+    bevelSegments:2
+  });
+  geom.computeBoundingBox();
+  const bb=geom.boundingBox;
+  const cx=(bb.max.x+bb.min.x)/2, cz=(bb.max.y+bb.min.y)/2;
+  geom.translate(-cx,-cz,0);
+  // Xoay geometry trước để nằm phẳng trên XZ — tránh lỗi Euler khi kết hợp rotation.x + rotation.y
+  geom.rotateX(-Math.PI/2);
+  const mat=new THREE.MeshStandardMaterial({
+    color:raisedTextColors[frameIndex],
+    metalness:.28,
+    roughness:.20,
+    emissive:raisedTextColors[frameIndex],
+    emissiveIntensity:.08
+  });
+  const mesh=new THREE.Mesh(geom,mat);
+  // Chỉ xoay quanh trục Y thế giới → chữ luôn nằm phẳng và đúng chiều theo từng cánh chữ thập.
+  // Hàng đỏ (0) và xanh (2) giữ nguyên.
+  // Hàng trắng (1) và đen (3) bị ngược chiều → thêm π để lật đúng chiều (thứ tự 1→6 không đổi).
+  mesh.rotation.y=-frameIndex*Math.PI/2;
+  if(frameIndex===1||frameIndex===3) mesh.rotation.y+=Math.PI;
+  mesh.position.y=.095;
+  mesh.castShadow=true;
+  mesh.receiveShadow=true;
+  g.add(mesh);
+}
+const raisedFontLoader=new THREE.FontLoader();
+raisedFontLoader.load('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/fonts/helvetiker_bold.typeface.json',font=>{
+  raisedFont=font;
+  for(const item of raisedTextQueue)addRaisedNumber(item[0],item[1],item[2]);
+  raisedTextQueue.length=0;
+});
+const seen=new Set();
+for(let aidx=0;aidx<4;aidx++){
+  const a=[0,90,180,270][aidx];
+  for(let li=0;li<3;li++){
+    const seg=[[16,1,16,16],[20,4,20,18],[24,1,24,16]][li];
+    for(let i=0;i<6;i++){
+      const t=i/5, q=rot(seg[0]+(seg[2]-seg[0])*t,seg[1]+(seg[3]-seg[1])*t,a);
+      const x=Math.round(q[0]*1e6)/1e6,y=Math.round(q[1]*1e6)/1e6,k=x+','+y;
+      if(!seen.has(k)){seen.add(k);slot(x,y)}
+    }
+  }
+  const q=rot(20,1,a),x=Math.round(q[0]*1e6)/1e6,y=Math.round(q[1]*1e6)/1e6,k=x+','+y;
+  if(!seen.has(k)){seen.add(k);slot(x,y)}
+}
+// 4 khung nút của chữ thập trung tâm.
+// Mỗi khung dùng đúng một màu; màu được lấy theo hàng nút ở bên phải khung.
+// Thứ tự theo chiều xoay quanh tâm: xanh da trời, đen bóng, trắng ngà, đỏ cờ.
+const crossMats=[
+  // Khung trên: cùng màu hàng nút bên phải = đỏ cờ
+  {rim:new THREE.MeshStandardMaterial({color:0xff0000,metalness:.10,roughness:.20,clearcoat:.40,clearcoatRoughness:.10}),dish:new THREE.MeshPhysicalMaterial({color:0xff0000,metalness:.06,roughness:.18,clearcoat:.45,clearcoatRoughness:.09})},
+  // Xoay 90°: khung bên phải = trắng ngà
+  {rim:new THREE.MeshStandardMaterial({color:0xf5f0df,metalness:.18,roughness:.20}),dish:new THREE.MeshPhysicalMaterial({color:0xe9e1c9,metalness:.08,roughness:.18,clearcoat:.45,clearcoatRoughness:.10})},
+  // Xoay 90° tiếp: khung dưới = xanh da trời thẫm
+  {rim:new THREE.MeshStandardMaterial({color:0x0055ff,metalness:.18,roughness:.20,clearcoat:.35,clearcoatRoughness:.10}),dish:new THREE.MeshPhysicalMaterial({color:0x0055ff,metalness:.10,roughness:.16,clearcoat:.45,clearcoatRoughness:.08})},
+  // Xoay 90° tiếp: khung bên trái = đen bóng
+  {rim:new THREE.MeshStandardMaterial({color:0x05070a,metalness:.65,roughness:.055,clearcoat:1,clearcoatRoughness:.035,reflectivity:1}),dish:new THREE.MeshPhysicalMaterial({color:0x05070a,metalness:.45,roughness:.045,clearcoat:1,clearcoatRoughness:.03,reflectivity:1})}
+];
+for(let aidx=0;aidx<4;aidx++){
+  const a=[0,90,180,270][aidx];
+  for(let i=0;i<6;i++){
+    const t=i/5;
+    const q=rot(20,4+(18-4)*t,a);
+    const x=Math.round(q[0]*1e6)/1e6;
+    const y=Math.round(q[1]*1e6)/1e6;
+    const g=new THREE.Group();
+    g.position.copy(P(x,y,.015));
+    const r=new THREE.Mesh(rimGeo,crossMats[aidx].rim);
+    r.position.y=-.005;
+    g.add(r);
+    const d=new THREE.Mesh(dishGeo,crossMats[aidx].dish);
+    d.position.y=.002;
+    g.add(d);
+    addRaisedNumber(g,i+1,aidx);
+    scene.add(g);
+  }
+}
+
+// CHUỒNG XUẤT QUÂN: 4 ô 14×14.
+// Màu nền được lấy trực tiếp theo màu của CHUỒNG LÊN QUÂN
+// (6 nút có số 1→6) của chính người chơi đó.
+// Thứ tự màu theo 4 khung lên quân:
+// 0 = xanh, 1 = đỏ, 2 = vàng, 3 = trắng/ivory.
+// Vật liệu 4 chuồng theo Ngũ Hành:
+// Lửa = nền vân gỗ đỏ
+// Kim  = vàng ánh kim
+// Nước = đen bóng như đá quý
+// Thổ  = Bạch ngọc trong, sáng
+
+function createRedWoodTexture(){
+  const c=document.createElement('canvas');
+  c.width=512; c.height=512;
+  const ctx=c.getContext('2d');
+
+  ctx.fillStyle='#7d1515';
+  ctx.fillRect(0,0,512,512);
+
+  // Vân gỗ đỏ chạy dọc, mềm và không quá dày.
+  for(let i=0;i<95;i++){
+    const y=i*5.7 + Math.sin(i*1.73)*3;
+    ctx.beginPath();
+    ctx.moveTo(0,y);
+    for(let x=0;x<=512;x+=16){
+      const yy=y
+        + Math.sin(x*.018+i*.71)*2.4
+        + Math.sin(x*.055+i*1.31)*.9;
+      ctx.lineTo(x,yy);
+    }
+    ctx.strokeStyle=(i%7===0)?'rgba(255,150,110,.16)':'rgba(45,0,0,.20)';
+    ctx.lineWidth=(i%7===0)?3.0:1.4;
+    ctx.stroke();
+  }
+
+  const tex=new THREE.CanvasTexture(c);
+  tex.wrapS=THREE.RepeatWrapping;
+  tex.wrapT=THREE.RepeatWrapping;
+  tex.repeat.set(1.5,1.5);
+  tex.needsUpdate=true;
+  return tex;
+}
+
+const redWoodTex=createRedWoodTexture();
+
+const spawnBgMats=[
+  // LỬA — gỗ đỏ có vân
+  new THREE.MeshPhysicalMaterial({
+    map:redWoodTex,
+    color:0xb52a24,
+    metalness:.05,
+    roughness:.42,
+    clearcoat:.22,
+    clearcoatRoughness:.28
+  }),
+
+  // KIM — vàng ánh kim của kim loại vàng
+  new THREE.MeshPhysicalMaterial({
+    color:0xd8a928,
+    metalness:1.0,
+    roughness:.16,
+    clearcoat:.65,
+    clearcoatRoughness:.12
+  }),
+
+  // NƯỚC — đen bóng như đá quý
+  new THREE.MeshPhysicalMaterial({
+    color:0x05070a,
+    metalness:.30,
+    roughness:.055,
+    clearcoat:1.0,
+    clearcoatRoughness:.045,
+    reflectivity:1.0
+  }),
+
+  // THỔ — Bạch ngọc trong và sáng
+  new THREE.MeshPhysicalMaterial({
+    color:0xf8fbff,
+    metalness:.03,
+    roughness:.10,
+    clearcoat:.75,
+    clearcoatRoughness:.08,
+    transmission:.28,
+    thickness:.35,
+    ior:1.46,
+    transparent:false
+  })
+];
+
+function spawnBackground(x,y,w,h,mi){
+  const g=new THREE.Mesh(
+    new THREE.BoxGeometry(w*S,.055,h*S),
+    spawnBgMats[mi]
+  );
+  g.position.copy(P(x+w/2,y+h/2,.018));
+  g.receiveShadow=true;
+  scene.add(g);
+}
+
+// Chuồng xuất quân 14×14:
+// dưới trái  ↔ khung lên quân xanh
+// trên trái   ↔ khung lên quân trắng
+// trên phải   ↔ khung lên quân vàng
+// dưới phải   ↔ khung lên quân đỏ
+// Chuồng 14×14:
+// dưới trái = Lửa
+// trên phải  = Kim
+// dưới phải  = Nước
+// trên trái  = Thổ
+// Màu nền 4 chuồng 14×14:
+  // trên trái = đen bóng
+  // dưới phải = trắng ngà (đối qua đường chéo)
+  // trên phải = đỏ cờ
+  // dưới trái = xanh da trời (đối qua đường chéo)
+  const blackGlossMat=new THREE.MeshPhysicalMaterial({color:0x05070a,metalness:.30,roughness:.055,clearcoat:1.0,clearcoatRoughness:.045,reflectivity:1.0});
+  const ivoryMat=new THREE.MeshPhysicalMaterial({color:0xf5f0df,metalness:.03,roughness:.10,clearcoat:.75,clearcoatRoughness:.08});
+  const flagRedMat=new THREE.MeshPhysicalMaterial({color:0xff0000,metalness:.05,roughness:.30,clearcoat:.35,clearcoatRoughness:.15});
+  const skyBlueMat=new THREE.MeshPhysicalMaterial({color:0x0055ff,metalness:.05,roughness:.30,clearcoat:.35,clearcoatRoughness:.15});
+  function spawnBackgroundWithMat(x,y,w,h,mat){
+    const g=new THREE.Mesh(new THREE.BoxGeometry(w*S,.055,h*S),mat);
+    g.position.copy(P(x+w/2,y+h/2,.018));
+    g.receiveShadow=true;
+    scene.add(g);
+  }
+  spawnBackgroundWithMat(0,0,14,14,blackGlossMat);
+  spawnBackgroundWithMat(26,26,14,14,ivoryMat);
+  spawnBackgroundWithMat(26,0,14,14,flagRedMat);
+  spawnBackgroundWithMat(0,26,14,14,skyBlueMat);
+// ĐƯỜNG BAO: GỜ THẲNG NỔI LIÊN TỤC
+// Bề rộng gờ = 2 lần độ dày viền của đường tròn.
+const borderMat=new THREE.MeshStandardMaterial({color:0xf6d36a,metalness:.95,roughness:.18});
+const BORDER_WIDTH=S*.20;
+const BORDER_HEIGHT=.22;
+function borderLine(x1,y1,x2,y2){
+  const dx=x2-x1,dy=y2-y1,L=Math.hypot(dx,dy);
+  if(L<=0)return;
+  const g=new THREE.BoxGeometry(L*S,BORDER_HEIGHT,BORDER_WIDTH);
+  const m=new THREE.Mesh(g,borderMat);
+  m.position.copy(P((x1+x2)/2,(y1+y2)/2,.16));
+  m.rotation.y=-Math.atan2(dy,dx);
+  m.castShadow=true;
+  m.receiveShadow=true;
+  scene.add(m);
+}
+function borderRect(x,y,w,h){
+  borderLine(x,y,x+w,y);
+  borderLine(x+w,y,x+w,y+h);
+  borderLine(x+w,y+h,x,y+h);
+  borderLine(x,y+h,x,y);
+}
+// Khung 40x40 + bốn ô góc 14x14
+borderRect(0,0,40,40);
+borderRect(0,0,14,14);
+borderRect(0,26,14,14);
+borderRect(26,26,14,14);
+borderRect(26,0,14,14);
+// X trung tâm
+borderLine(18,18,22,22);
+borderLine(18,22,22,18);
+// Dấu thập kín, đúng tọa độ nguồn 2D
+const E0=2.5,E1=37.5;
+borderLine(18,22,18,E1);
+borderLine(22,22,22,E1);
+borderLine(18,18,18,E0);
+borderLine(22,18,22,E0);
+borderLine(18,18,E0,18);
+borderLine(18,22,E0,22);
+borderLine(22,18,E1,18);
+borderLine(22,22,E1,22);
+borderLine(18,E1,22,E1);
+borderLine(18,E0,22,E0);
+borderLine(E0,18,E0,22);
+borderLine(E1,18,E1,22);
+// CAMERA / TOUCH — DÙNG THREE.ORBITCONTROLS
+// 1 ngón  = xoay bàn cờ.
+// 2 ngón  = pinch zoom.
+// Không tự xử lý touch bằng touchstart/touchmove nữa,
+// tránh xung đột với WebGL/Three.js.
+
+const controls=new THREE.OrbitControls(camera,renderer.domElement);
+
+controls.target.set(0,0,0);
+controls.enableDamping=true;
+controls.dampingFactor=.08;
+
+// Không cho pan.
+// OrbitControls sẽ dùng:
+//   1 ngón -> rotate
+//   2 ngón -> dolly/pinch
+controls.enablePan=false;
+controls.enableRotate=true;
+controls.enableZoom=true;
+
+// Không cho camera chui xuống dưới bàn.
+controls.maxPolarAngle=1.45;
+controls.minPolarAngle=.30;
+
+// Camera khoảng cách:
+// minDistance = zoom IN tối đa theo chiều dài điện thoại.
+// maxDistance = zoom OUT tối đa theo chiều ngang điện thoại.
+function setPhoneZoomLimits(){
+  const halfBoard=W/2;
+  const halfFovY=THREE.MathUtils.degToRad(camera.fov/2);
+
+  // Bàn vừa phủ chiều cao màn hình.
+  const minD=halfBoard/Math.tan(halfFovY);
+
+  const v=halfFovY;
+  const halfFovX=Math.atan(Math.tan(v)*camera.aspect);
+
+  // Bàn vừa phủ chiều ngang màn hình.
+  const maxD=halfBoard/Math.tan(halfFovX);
+
+  controls.minDistance=minD;
+  controls.maxDistance=Math.max(minD+.01,maxD);
+}
+
+camera.position.set(0,31,29);
+setPhoneZoomLimits();
+controls.update();
+
+renderer.domElement.addEventListener('wheel',e=>{
+  // OrbitControls xử lý wheel zoom.
+  // Không thêm một camera zoom thứ hai.
+},{passive:true});
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+  setPhoneZoomLimits();
+  controls.update();
+});
+
+(function loop(){
+  requestAnimationFrame(loop);
+  controls.update();
+  renderer.render(scene,camera);
+})();
+</script></body></html>
