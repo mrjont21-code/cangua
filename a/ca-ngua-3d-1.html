@@ -1,0 +1,912 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Cá Ngựa 3D — 4 chuồng xuất quân</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080704}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+#err{position:fixed;inset:0;display:none;place-items:center;color:#ffd76a;background:#080704;font:16px sans-serif;padding:30px;text-align:center}
+</style>
+</head>
+<body>
+<div id="err"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FontLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/TextGeometry.js"></script>
+<script>
+if(!window.THREE){document.getElementById('err').style.display='grid';document.getElementById('err').textContent='Không tải được Three.js. Hãy kiểm tra Internet.';throw Error('THREE');}
+
+/* ═══════════════════════════════════════════════════════════════
+   HORSE3D — adapted from horse3d.js (global THREE, no modules)
+   ═══════════════════════════════════════════════════════════════ */
+const TAU = Math.PI * 2;
+const DEG = Math.PI / 180;
+const HORSE_STANDARD = Object.freeze({
+  BASE_DIAMETER: 8, PEDESTAL_TOP: 2.6, UPPER_SCALE: 1.5, ACCENT: 0xf59e0b
+});
+const HEADING = Object.freeze({ EAST: 0, NORTH: 90, WEST: 180, SOUTH: -90 });
+const EASE = {
+  linear: t => t,
+  in: t => t * t,
+  out: t => 1 - Math.pow(1 - t, 3),
+  inOut: t => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2)
+};
+let SHARED = null;
+function createHorseShape() {
+  const s = new THREE.Shape();
+  s.moveTo(-0.9, -0.2);
+  s.bezierCurveTo(-1.3, 1.5, -1.4, 3.2, -0.9, 4.6);
+  s.bezierCurveTo(-1.0, 5.4, -0.8, 6.2, -0.3, 6.6);
+  s.lineTo(-0.1, 6.7);
+  s.bezierCurveTo(0.0, 5.9, 0.3, 5.5, 0.7, 5.3);
+  s.bezierCurveTo(1.3, 5.0, 2.3, 4.3, 2.7, 3.6);
+  s.bezierCurveTo(2.8, 3.1, 2.3, 2.8, 1.8, 2.9);
+  s.bezierCurveTo(1.4, 2.7, 1.0, 2.3, 0.8, 1.7);
+  s.bezierCurveTo(0.6, 0.9, 0.7, 0.3, 0.8, -0.2);
+  s.closePath();
+  return s;
+}
+function getShared() {
+  if (SHARED) return SHARED;
+  const horseGeo = new THREE.ExtrudeGeometry(createHorseShape(), {
+    steps: 2, depth: 1.4, bevelEnabled: true,
+    bevelThickness: 0.35, bevelSize: 0.3, bevelOffset: 0, bevelSegments: 8
+  });
+  horseGeo.center();
+  horseGeo.computeBoundingBox();
+  SHARED = {
+    horseGeo,
+    bot: new THREE.CylinderGeometry(3.6, 4.0, 0.8, 48),
+    mid: new THREE.CylinderGeometry(3.0, 3.4, 0.6, 48),
+    top: new THREE.CylinderGeometry(2.4, 3.0, 1.2, 48),
+    belt: new THREE.TorusGeometry(3.2, 0.15, 16, 48),
+    eye: {
+      socket: new THREE.SphereGeometry(0.43, 40, 28),
+      ball: new THREE.SphereGeometry(0.34, 48, 32),
+      pupil: new THREE.SphereGeometry(0.145, 32, 24),
+      iris: new THREE.RingGeometry(0.17, 0.265, 48),
+      glint1: new THREE.SphereGeometry(0.072, 20, 16),
+      glint2: new THREE.SphereGeometry(0.032, 16, 12)
+    },
+    eyeMat: {
+      ball: new THREE.MeshPhysicalMaterial({ color: 0x5b3518, roughness: 0.12, metalness: 0.02, clearcoat: 1, clearcoatRoughness: 0.04 }),
+      pupil: new THREE.MeshPhysicalMaterial({ color: 0x050505, roughness: 0.06, clearcoat: 1, clearcoatRoughness: 0.02 }),
+      iris: new THREE.MeshBasicMaterial({ color: 0x8a4b20, side: THREE.DoubleSide }),
+      glint: new THREE.MeshBasicMaterial({ color: 0xffffff })
+    },
+    dims: null
+  };
+  return SHARED;
+}
+function makeMaterial(color, type) {
+  switch (type) {
+    case 'plastic':
+      return new THREE.MeshPhysicalMaterial({ color, roughness: 0.15, metalness: 0.05, clearcoat: 1, clearcoatRoughness: 0.1, reflectivity: 0.9 });
+    case 'wood':
+      return new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0 });
+    case 'metal':
+      return new THREE.MeshStandardMaterial({ color, roughness: 0.15, metalness: 0.9 });
+    case 'gold':
+      return new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.15, metalness: 0.9 });
+    case 'glass':
+      return new THREE.MeshPhysicalMaterial({ color, roughness: 0.1, metalness: 0.1, transmission: 0.6, opacity: 0.9, transparent: true, ior: 1.5, thickness: 2 });
+    default:
+      return new THREE.MeshStandardMaterial({ color });
+  }
+}
+function buildEye(sh, socketMat, side) {
+  const g = new THREE.Group();
+  g.position.set(0.78, 0.98, 0.56 * side);
+  g.rotation.y = side > 0 ? -0.08 : Math.PI + 0.08;
+  g.scale.setScalar(1.65);
+  const sx = side;
+  const add = (geo, mat, sc, pos) => {
+    const m = new THREE.Mesh(geo, mat);
+    if (sc) m.scale.set(...sc);
+    m.position.set(...pos);
+    g.add(m);
+    return m;
+  };
+  add(sh.eye.socket, socketMat, [1, 0.82, 0.34], [0, 0, 0.10]);
+  add(sh.eye.ball, sh.eyeMat.ball, [1, 0.92, 0.55], [0, 0, 0.16]);
+  add(sh.eye.pupil, sh.eyeMat.pupil, [1, 1.08, 0.45], [0.025 * sx, -0.005, 0.40]);
+  add(sh.eye.iris, sh.eyeMat.iris, [1, 0.92, 1], [0, 0, 0.39]);
+  add(sh.eye.glint1, sh.eyeMat.glint, null, [-0.09 * sx, 0.105, 0.56]);
+  add(sh.eye.glint2, sh.eyeMat.glint, null, [0.105 * sx, -0.015, 0.55]);
+  return g;
+}
+const newAcc = () => ({ x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, hd: 0, nz: 0, ny: 0 });
+const wrapPi = a => Math.atan2(Math.sin(a), Math.cos(a));
+const pt = p => (p ? { x: p.x ?? 0, y: p.y ?? 0, z: p.z ?? 0 } : null);
+
+class Horse3D {
+  constructor(o = {}) {
+    const sh = getShared();
+    this.color = o.color ?? 0xdc2626;
+    this.materialType = o.material ?? 'plastic';
+    this.accent = o.accent ?? HORSE_STANDARD.ACCENT;
+    this.size = 1;
+    this.state = { pos: new THREE.Vector3(), heading: 0 };
+    this._tracks = [];
+    this._ev = {};
+    this._acc = newAcc();
+    this._markers = null;
+    this.penId = o.penId ?? -1;
+    this.gridX = 0;
+    this.gridY = 0;
+
+    this.mat = makeMaterial(this.color, this.materialType);
+    this.socketMat = new THREE.MeshPhysicalMaterial({ roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.08 });
+    this.beltMat = new THREE.MeshStandardMaterial({ color: this.accent, metalness: 0.8, roughness: 0.2 });
+    this._bodyMeshes = [];
+    const shadows = o.shadows !== false;
+
+    const model = new THREE.Group();
+    model.name = 'HorseModel';
+    const body = (geo, y) => {
+      const m = new THREE.Mesh(geo, this.mat);
+      m.position.y = y;
+      m.castShadow = m.receiveShadow = shadows;
+      model.add(m);
+      this._bodyMeshes.push(m);
+    };
+    body(sh.bot, 0.4); body(sh.mid, 1.1); body(sh.top, 2.0);
+    const belt = new THREE.Mesh(sh.belt, this.beltMat);
+    belt.rotation.x = Math.PI / 2; belt.position.y = 0.8;
+    model.add(belt);
+
+    this.neck = new THREE.Group();
+    this.neck.name = 'Neck';
+    this.neck.position.y = HORSE_STANDARD.PEDESTAL_TOP;
+    model.add(this.neck);
+    const upper = new THREE.Group();
+    upper.scale.setScalar(HORSE_STANDARD.UPPER_SCALE);
+    upper.position.y = -sh.horseGeo.boundingBox.min.y * HORSE_STANDARD.UPPER_SCALE;
+    this.neck.add(upper);
+    const head = new THREE.Mesh(sh.horseGeo, this.mat);
+    head.position.x = 0.75;
+    head.castShadow = head.receiveShadow = shadows;
+    upper.add(head);
+    this._bodyMeshes.push(head);
+    head.add(buildEye(sh, this.socketMat, 1), buildEye(sh, this.socketMat, -1));
+
+    if (!sh.dims) {
+      const b = new THREE.Box3().setFromObject(model);
+      const height = b.max.y - b.min.y;
+      const cy = b.min.y + height / 2;
+      let r = 0;
+      for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) {
+        r = Math.max(r, Math.hypot(x, y - cy, z));
+      }
+      sh.dims = { height, centerY: cy, radius: r, baseDiameter: HORSE_STANDARD.BASE_DIAMETER };
+    }
+    this.dims = sh.dims;
+
+    this.root = new THREE.Group();
+    this.root.name = 'Horse3D';
+    this.root.userData.horse3d = this;
+    this.pivot = new THREE.Group();
+    this.pivot.name = 'Pivot';
+    this.pivot.position.y = this.dims.centerY;
+    this.root.add(this.pivot);
+    model.position.y = -this.dims.centerY;
+    this.pivot.add(model);
+    this.anchors = { base: new THREE.Object3D(), center: new THREE.Object3D() };
+    this.anchors.base.name = 'ANCHOR_BASE';
+    this.anchors.center.name = 'ANCHOR_CENTER';
+    this.root.add(this.anchors.base);
+    this.pivot.add(this.anchors.center);
+
+    this._syncColors();
+    this.configure({ size: o.size, heading: o.heading, position: o.position });
+  }
+  configure(o = {}) {
+    if (o.material) this.setMaterial(o.material);
+    if (o.color != null) this.setColor(o.color);
+    if (o.accent != null) this.setAccent(o.accent);
+    if (o.size != null) this.setSize(o.size);
+    if (o.heading != null) this.setHeading(o.heading);
+    if (o.position) this.setPosition(o.position);
+    return this;
+  }
+  _syncColors() {
+    const c = this.materialType === 'gold' ? 0xf59e0b : this.color;
+    this.mat.color.set(c);
+    this.socketMat.color.set(c);
+  }
+  setColor(hex) { this.color = hex; this._syncColors(); return this; }
+  setAccent(hex) { this.accent = hex; this.beltMat.color.set(hex); return this; }
+  setMaterial(type) {
+    if (type === this.materialType) return this;
+    this.materialType = type;
+    const old = this.mat;
+    this.mat = makeMaterial(this.color, type);
+    this._bodyMeshes.forEach(m => { m.material = this.mat; });
+    old.dispose();
+    this._syncColors();
+    return this;
+  }
+  setSize(s) { this.size = s; this.root.scale.setScalar(s); return this; }
+  setBaseDiameter(d) { return this.setSize(d / HORSE_STANDARD.BASE_DIAMETER); }
+  setVisible(v) { this.root.visible = v; return this; }
+  setPosition(x, y, z) {
+    if (typeof x === 'object') { y = x.y ?? 0; z = x.z ?? 0; x = x.x ?? 0; }
+    this.state.pos.set(x ?? 0, y ?? 0, z ?? 0);
+    this._apply(this._acc);
+    return this;
+  }
+  setHeading(deg) { this.state.heading = deg * DEG; this._apply(this._acc); return this; }
+  faceTo(x, z) {
+    if (typeof x === 'object') { z = x.z; x = x.x; }
+    const dx = x - this.state.pos.x, dz = z - this.state.pos.z;
+    if (Math.hypot(dx, dz) > 1e-6) this.state.heading = Math.atan2(-dz, dx);
+    this._apply(this._acc);
+    return this;
+  }
+  get headingDeg() { return this.state.heading / DEG; }
+  getBasePosition(out = new THREE.Vector3()) { this.root.updateMatrixWorld(true); return this.anchors.base.getWorldPosition(out); }
+  getCenterPosition(out = new THREE.Vector3()) { this.root.updateMatrixWorld(true); return this.anchors.center.getWorldPosition(out); }
+  getDimensions() {
+    const s = this.size;
+    return { baseDiameter: this.dims.baseDiameter * s, height: this.dims.height * s, centerHeight: this.dims.centerY * s, radius: this.dims.radius * s };
+  }
+  play(name, o = {}) {
+    const def = ACTIONS[name];
+    if (!def) return Promise.reject(new Error('Horse3D: hành động không tồn tại "' + name + '"'));
+    return new Promise(resolve => {
+      const tr = def(this, o);
+      tr.name = name; tr.o = o; tr.t0 = -(o.delay ?? 0); tr.resolve = resolve;
+      tr.dur = tr.dur ?? o.duration ?? 1;
+      tr.ease = EASE[o.ease] || (typeof o.ease === 'function' ? o.ease : tr.ease || EASE.inOut);
+      tr.loop = o.loop ?? tr.loop ?? false;
+      this._tracks.push(tr);
+      this._emit('start', { action: name });
+    });
+  }
+  stop(name) {
+    this._tracks = this._tracks.filter(tr => {
+      if (name && tr.name !== name) return true;
+      tr.resolve(false);
+      return false;
+    });
+    return this;
+  }
+  get busy() { return this._tracks.some(t => !t.loop); }
+  update(dt) {
+    dt = Math.min(Math.max(dt, 0), 0.1);
+    const acc = this._acc = newAcc();
+    for (const tr of this._tracks.slice()) {
+      tr.t0 += dt;
+      if (tr.t0 < 0) continue;
+      let t = tr.t0 / tr.dur;
+      if (tr.loop) t %= 1;
+      if (t >= 1 && !tr.loop) {
+        this._tracks.splice(this._tracks.indexOf(tr), 1);
+        tr.end?.(this);
+        tr.resolve(true);
+        this._emit('end', { action: tr.name });
+        if (tr.landed) this._emit('land', { action: tr.name, position: this.state.pos.clone() });
+      } else {
+        tr.step(t, acc, tr.ease(t), this);
+      }
+    }
+    this._apply(acc);
+  }
+  _apply(acc) {
+    const s = this.state;
+    this.root.position.set(s.pos.x + acc.x, s.pos.y + acc.y, s.pos.z + acc.z);
+    this.root.rotation.y = s.heading + acc.hd;
+    this.pivot.rotation.set(acc.rx, acc.ry, acc.rz);
+    this.neck.rotation.set(0, acc.ny, acc.nz);
+  }
+  on(evt, fn) { (this._ev[evt] ||= new Set()).add(fn); return () => this._ev[evt].delete(fn); }
+  off(evt, fn) { this._ev[evt]?.delete(fn); return this; }
+  _emit(evt, data) { this._ev[evt]?.forEach(f => f(data, this)); }
+  addTo(parent) { parent.add(this.root); return this; }
+  removeFrom() { this.root.removeFromParent(); return this; }
+  dispose() {
+    this.stop(); this.removeFrom();
+    this.mat.dispose(); this.socketMat.dispose(); this.beltMat.dispose();
+  }
+}
+const faceDelta = (h, dx, dz) => (Math.hypot(dx, dz) > 1e-6 ? wrapPi(Math.atan2(-dz, dx) - h.state.heading) : 0);
+function travel(h, o) {
+  const from = h.state.pos.clone();
+  const to = pt(o.to) || { x: from.x, y: from.y, z: from.z };
+  const dest = new THREE.Vector3(to.x, o.to?.y ?? from.y, to.z);
+  const delta = o.face === false ? 0 : faceDelta(h, dest.x - from.x, dest.z - from.z);
+  const dist = from.distanceTo(dest);
+  return {
+    from, dest, delta, dist,
+    apply: (acc, k, t) => {
+      acc.x += (dest.x - from.x) * k; acc.y += (dest.y - from.y) * k; acc.z += (dest.z - from.z) * k;
+      acc.hd += delta * EASE.out(Math.min(1, t / 0.3));
+    },
+    commit: () => { h.state.pos.copy(dest); h.state.heading = wrapPi(h.state.heading + delta); }
+  };
+}
+const ACTIONS = {
+  jump(h, o) {
+    const m = travel(h, o);
+    const height = (o.height ?? 4.6) * h.size, tilt = o.tilt ?? 0.2, twist = o.twist ?? 0.18;
+    return {
+      dur: o.duration ?? 1.15, ease: EASE.out, landed: true,
+      step(t, acc, k) {
+        const arc = Math.sin(Math.PI * t);
+        m.apply(acc, k, t);
+        acc.y += arc * height;
+        acc.rx += arc * tilt; acc.ry += arc * twist;
+      },
+      end: () => m.commit()
+    };
+  },
+  move(h, o) {
+    const m = travel(h, o);
+    return { dur: o.duration ?? Math.max(0.4, m.dist / (o.speed ?? 10)), step: (t, acc, k) => m.apply(acc, k, t), end: () => m.commit() };
+  },
+  turn(h, o) {
+    const dest = o.heading != null ? o.heading * DEG : (o.to ? Math.atan2(-(o.to.z - h.state.pos.z), o.to.x - h.state.pos.x) : h.state.heading);
+    const delta = wrapPi(dest - h.state.heading);
+    return { dur: o.duration ?? 0.5, step: (t, acc, k) => { acc.hd += delta * k; }, end: () => { h.state.heading = wrapPi(h.state.heading + delta); } };
+  },
+  spin(h, o) {
+    const a = (o.turns ?? 1) * TAU * (o.reverse ? -1 : 1);
+    return { dur: o.duration ?? 1.4, step: (t, acc, k) => { acc.hd += a * k; }, end: () => { h.state.heading = wrapPi(h.state.heading + a); } };
+  },
+  nod: (h, o) => ({ dur: o.duration ?? 0.9, step: (t, acc) => { acc.nz -= (o.amp ?? 0.28) * (1 - Math.cos(t * TAU * (o.times ?? 2))) / 2; } }),
+  shake: (h, o) => ({ dur: o.duration ?? 0.9, step: (t, acc) => { acc.ny += (o.amp ?? 0.35) * Math.sin(t * TAU * (o.times ?? 3)) * Math.sin(Math.PI * t); } }),
+  idle: (h, o) => ({ dur: o.duration ?? 2.4, loop: true, ease: EASE.linear, step: (t, acc) => { acc.y += 0.12 * h.size * Math.sin(t * TAU); acc.nz += 0.03 * Math.sin(t * TAU + 1); } })
+};
+
+/* ═══════════════════════════════════════════════════════════════
+   BOARD + GAME LOGIC
+   ═══════════════════════════════════════════════════════════════ */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x080704);
+const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, .1, 200);
+camera.position.set(0, 31, 29);
+camera.lookAt(0, 0, 0);
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xfff2c4, 0x261400, 1.25));
+const sun = new THREE.DirectionalLight(0xffffff, 2.1);
+sun.position.set(-14, 28, 18);
+sun.castShadow = true;
+scene.add(sun);
+const warm = new THREE.PointLight(0xffb300, 1.5, 60);
+warm.position.set(18, 14, -14);
+scene.add(warm);
+
+const GRID = 40, W = 28, S = W / GRID;
+function P(x, y, h = 0) { return new THREE.Vector3((x - 20) * S, h, (20 - y) * S); }
+
+/* —— bàn 40×40 —— */
+const boardMat = new THREE.MeshPhysicalMaterial({ color: 0xc99716, metalness: .9, roughness: .23, clearcoat: 1, clearcoatRoughness: .12 });
+const board = new THREE.Mesh(new THREE.BoxGeometry(W, .75, W), boardMat);
+board.position.y = -.42;
+board.receiveShadow = true;
+scene.add(board);
+
+const rimMat = new THREE.MeshStandardMaterial({ color: 0xf6d36a, metalness: 1, roughness: .16 });
+const dishMat = new THREE.MeshPhysicalMaterial({ color: 0xa9780b, metalness: .85, roughness: .3, clearcoat: .35 });
+const rimGeo = new THREE.TorusGeometry(S * .98, S * .10, 14, 36);
+rimGeo.rotateX(Math.PI / 2);
+const dishGeo = new THREE.CylinderGeometry(S * .83, S * .94, S * .10, 36);
+
+const pathFireMat = new THREE.MeshPhysicalMaterial({ color: 0x05070a, metalness: .30, roughness: .055, clearcoat: 1, clearcoatRoughness: .045, reflectivity: 1 });
+const pathMetalMat = new THREE.MeshPhysicalMaterial({ color: 0xf5f0df, metalness: .03, roughness: .10, clearcoat: .75, clearcoatRoughness: .08 });
+const pathWaterMat = new THREE.MeshPhysicalMaterial({ color: 0xff0000, metalness: .05, roughness: .30, clearcoat: .35, clearcoatRoughness: .15 });
+const pathEarthMat = new THREE.MeshPhysicalMaterial({ color: 0x0055ff, metalness: .05, roughness: .30, clearcoat: .35, clearcoatRoughness: .15 });
+function pathMatFor(x, y) {
+  if (x < 20 && y < 20 && (x >= 16 || y >= 16)) return pathFireMat;
+  if (x < 20 && y > 20 && (x >= 16 || y <= 24)) return pathEarthMat;
+  if (x > 20 && y > 20 && (x <= 24 || y <= 24)) return pathMetalMat;
+  if (x > 20 && y < 20 && (x <= 24 || y >= 16)) return pathWaterMat;
+  return null;
+}
+function slot(x, y) {
+  const g = new THREE.Group(), p = P(x, y, .015);
+  g.position.copy(p);
+  const pm = pathMatFor(x, y);
+  const r = new THREE.Mesh(rimGeo, pm || rimMat);
+  r.position.y = -.005;
+  g.add(r);
+  const d = new THREE.Mesh(dishGeo, pm || dishMat);
+  d.position.y = .002;
+  g.add(d);
+  scene.add(g);
+}
+function linePoints(x1, y1, x2, y2) { let a = []; for (let i = 0; i < 6; i++) { let t = i / 5; a.push([x1 + (x2 - x1) * t, y1 + (y2 - y1) * t]); } return a; }
+function rot(x, y, a) { let dx = x - 20, dy = y - 20, r = a * Math.PI / 180; return [20 + dx * Math.cos(r) - dy * Math.sin(r), 20 + dx * Math.sin(r) + dy * Math.cos(r)]; }
+
+const raisedTextColors = [0xffffff, 0x171717, 0xffffff, 0xffffff];
+let raisedFont = null;
+const raisedTextQueue = [];
+const RAISED_TEXT_SIZE = S * 1.5;
+const RAISED_TEXT_DEPTH = .055;
+function addRaisedNumber(g, num, frameIndex) {
+  if (!raisedFont) { raisedTextQueue.push([g, num, frameIndex]); return; }
+  const geom = new THREE.TextGeometry(String(num), {
+    font: raisedFont, size: RAISED_TEXT_SIZE, height: RAISED_TEXT_DEPTH,
+    curveSegments: 8, bevelEnabled: true, bevelThickness: .018, bevelSize: .012, bevelSegments: 2
+  });
+  geom.computeBoundingBox();
+  const bb = geom.boundingBox;
+  const cx = (bb.max.x + bb.min.x) / 2, cz = (bb.max.y + bb.min.y) / 2;
+  geom.translate(-cx, -cz, 0);
+  geom.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshStandardMaterial({
+    color: raisedTextColors[frameIndex], metalness: .28, roughness: .20,
+    emissive: raisedTextColors[frameIndex], emissiveIntensity: .08
+  });
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.rotation.y = -frameIndex * Math.PI / 2;
+  if (frameIndex === 1 || frameIndex === 3) mesh.rotation.y += Math.PI;
+  mesh.position.y = .095;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  g.add(mesh);
+}
+function createXuatPhatTexture(colorHex) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 160;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 256, 160);
+  ctx.font = '300 52px "Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = colorHex;
+  ctx.fillText('Xuất', 128, 52);
+  ctx.fillText('Phát', 128, 112);
+  const tex = new THREE.CanvasTexture(c);
+  tex.needsUpdate = true;
+  return tex;
+}
+function addXuatPhat(frameIndex, worldPos) {
+  const hex = raisedTextColors[frameIndex] === 0xffffff ? '#ffffff' : '#171717';
+  const tex = createXuatPhatTexture(hex);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: .95 });
+  const sp = new THREE.Sprite(mat);
+  sp.scale.set(S * 1.45, S * 0.90, 1);
+  sp.position.copy(worldPos);
+  sp.position.y = .28;
+  scene.add(sp);
+}
+const raisedFontLoader = new THREE.FontLoader();
+raisedFontLoader.load('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/fonts/helvetiker_bold.typeface.json', font => {
+  raisedFont = font;
+  for (const item of raisedTextQueue) addRaisedNumber(item[0], item[1], item[2]);
+  raisedTextQueue.length = 0;
+});
+
+const seen = new Set();
+for (let aidx = 0; aidx < 4; aidx++) {
+  const a = [0, 90, 180, 270][aidx];
+  for (let li = 0; li < 3; li++) {
+    const seg = [[16, 1, 16, 16], [20, 4, 20, 18], [24, 1, 24, 16]][li];
+    for (let i = 0; i < 6; i++) {
+      const t = i / 5, q = rot(seg[0] + (seg[2] - seg[0]) * t, seg[1] + (seg[3] - seg[1]) * t, a);
+      const x = Math.round(q[0] * 1e6) / 1e6, y = Math.round(q[1] * 1e6) / 1e6, k = x + ',' + y;
+      if (!seen.has(k)) { seen.add(k); slot(x, y); }
+    }
+  }
+  const edgeNodeMats = [
+    { rim: new THREE.MeshStandardMaterial({ color: 0xff0000, metalness: .10, roughness: .20, clearcoat: .40, clearcoatRoughness: .10 }), dish: new THREE.MeshPhysicalMaterial({ color: 0xff0000, metalness: .06, roughness: .18, clearcoat: .45, clearcoatRoughness: .09 }) },
+    { rim: new THREE.MeshStandardMaterial({ color: 0xf5f0df, metalness: .18, roughness: .20 }), dish: new THREE.MeshPhysicalMaterial({ color: 0xe9e1c9, metalness: .08, roughness: .18, clearcoat: .45, clearcoatRoughness: .10 }) },
+    { rim: new THREE.MeshStandardMaterial({ color: 0x0055ff, metalness: .18, roughness: .20, clearcoat: .35, clearcoatRoughness: .10 }), dish: new THREE.MeshPhysicalMaterial({ color: 0x0055ff, metalness: .10, roughness: .16, clearcoat: .45, clearcoatRoughness: .08 }) },
+    { rim: new THREE.MeshStandardMaterial({ color: 0x05070a, metalness: .65, roughness: .055, clearcoat: 1, clearcoatRoughness: .035, reflectivity: 1 }), dish: new THREE.MeshPhysicalMaterial({ color: 0x05070a, metalness: .45, roughness: .045, clearcoat: 1, clearcoatRoughness: .03, reflectivity: 1 }) }
+  ];
+  const q = rot(20, 1, a), x = Math.round(q[0] * 1e6) / 1e6, y = Math.round(q[1] * 1e6) / 1e6, k = x + ',' + y;
+  if (!seen.has(k)) {
+    seen.add(k);
+    const g = new THREE.Group();
+    g.position.copy(P(x, y, .015));
+    const r = new THREE.Mesh(rimGeo, edgeNodeMats[aidx].rim);
+    r.position.y = -.005;
+    g.add(r);
+    const d = new THREE.Mesh(dishGeo, edgeNodeMats[aidx].dish);
+    d.position.y = .002;
+    g.add(d);
+    scene.add(g);
+
+    const arrowStart = rot(20, 1, a);
+    const arrowEnd = rot(20, 4, a);
+    const dx = arrowEnd[0] - arrowStart[0];
+    const dz = -(arrowEnd[1] - arrowStart[1]);
+    const angle = Math.atan2(dz, dx);
+    const arrowColors = [0xffffff, 0x171717, 0xffffff, 0xffffff];
+    const arrowMat = new THREE.MeshPhysicalMaterial({
+      color: arrowColors[aidx], metalness: .30, roughness: .18, clearcoat: .75, clearcoatRoughness: .08,
+      emissive: arrowColors[aidx], emissiveIntensity: .05
+    });
+    const arrow = new THREE.Group();
+    arrow.position.copy(P(arrowStart[0], arrowStart[1], .23));
+    arrow.rotation.y = -angle;
+    const L = S * 1.60, Warr = S * .72, headL = S * .62, stemW = S * .30;
+    const stemBack = -(L / 2), headTip = L / 2, headBase = headTip - headL;
+    const shape = new THREE.Shape();
+    shape.moveTo(stemBack, -stemW / 2);
+    shape.lineTo(headBase, -stemW / 2);
+    shape.lineTo(headBase, -Warr / 2);
+    shape.lineTo(headTip, 0);
+    shape.lineTo(headBase, Warr / 2);
+    shape.lineTo(headBase, stemW / 2);
+    shape.lineTo(stemBack, stemW / 2);
+    shape.closePath();
+    const arrowGeo = new THREE.ExtrudeGeometry(shape, { depth: .075, bevelEnabled: true, bevelThickness: .018, bevelSize: .012, bevelSegments: 2, curveSegments: 2 });
+    arrowGeo.center();
+    const arrowMesh = new THREE.Mesh(arrowGeo, arrowMat);
+    arrowMesh.rotation.x = -Math.PI / 2;
+    arrowMesh.position.y = .055;
+    arrowMesh.castShadow = true;
+    arrowMesh.receiveShadow = true;
+    arrow.add(arrowMesh);
+    scene.add(arrow);
+    addXuatPhat(aidx, P(arrowStart[0], arrowStart[1], 0));
+  }
+}
+
+const crossMats = [
+  { rim: new THREE.MeshStandardMaterial({ color: 0xff0000, metalness: .10, roughness: .20, clearcoat: .40, clearcoatRoughness: .10 }), dish: new THREE.MeshPhysicalMaterial({ color: 0xff0000, metalness: .06, roughness: .18, clearcoat: .45, clearcoatRoughness: .09 }) },
+  { rim: new THREE.MeshStandardMaterial({ color: 0xf5f0df, metalness: .18, roughness: .20 }), dish: new THREE.MeshPhysicalMaterial({ color: 0xe9e1c9, metalness: .08, roughness: .18, clearcoat: .45, clearcoatRoughness: .10 }) },
+  { rim: new THREE.MeshStandardMaterial({ color: 0x0055ff, metalness: .18, roughness: .20, clearcoat: .35, clearcoatRoughness: .10 }), dish: new THREE.MeshPhysicalMaterial({ color: 0x0055ff, metalness: .10, roughness: .16, clearcoat: .45, clearcoatRoughness: .08 }) },
+  { rim: new THREE.MeshStandardMaterial({ color: 0x05070a, metalness: .65, roughness: .055, clearcoat: 1, clearcoatRoughness: .035, reflectivity: 1 }), dish: new THREE.MeshPhysicalMaterial({ color: 0x05070a, metalness: .45, roughness: .045, clearcoat: 1, clearcoatRoughness: .03, reflectivity: 1 }) }
+];
+for (let aidx = 0; aidx < 4; aidx++) {
+  const a = [0, 90, 180, 270][aidx];
+  for (let i = 0; i < 6; i++) {
+    const t = i / 5;
+    const q = rot(20, 4 + (18 - 4) * t, a);
+    const x = Math.round(q[0] * 1e6) / 1e6;
+    const y = Math.round(q[1] * 1e6) / 1e6;
+    const g = new THREE.Group();
+    g.position.copy(P(x, y, .015));
+    const r = new THREE.Mesh(rimGeo, crossMats[aidx].rim);
+    r.position.y = -.005;
+    g.add(r);
+    const d = new THREE.Mesh(dishGeo, crossMats[aidx].dish);
+    d.position.y = .002;
+    g.add(d);
+    addRaisedNumber(g, i + 1, aidx);
+    scene.add(g);
+  }
+}
+
+/* —— 4 chuồng 14×14 —— */
+const blackGlossMat = new THREE.MeshPhysicalMaterial({ color: 0x05070a, metalness: .30, roughness: .055, clearcoat: 1.0, clearcoatRoughness: .045, reflectivity: 1.0 });
+const ivoryMat = new THREE.MeshPhysicalMaterial({ color: 0xf5f0df, metalness: .03, roughness: .10, clearcoat: .75, clearcoatRoughness: .08 });
+const flagRedMat = new THREE.MeshPhysicalMaterial({ color: 0xff0000, metalness: .05, roughness: .30, clearcoat: .35, clearcoatRoughness: .15 });
+const skyBlueMat = new THREE.MeshPhysicalMaterial({ color: 0x0055ff, metalness: .05, roughness: .30, clearcoat: .35, clearcoatRoughness: .15 });
+function spawnBackgroundWithMat(x, y, w, h, mat) {
+  const g = new THREE.Mesh(new THREE.BoxGeometry(w * S, .055, h * S), mat);
+  g.position.copy(P(x + w / 2, y + h / 2, .018));
+  g.receiveShadow = true;
+  scene.add(g);
+}
+spawnBackgroundWithMat(0, 0, 14, 14, blackGlossMat);
+spawnBackgroundWithMat(26, 26, 14, 14, ivoryMat);
+spawnBackgroundWithMat(26, 0, 14, 14, flagRedMat);
+spawnBackgroundWithMat(0, 26, 14, 14, skyBlueMat);
+
+/* —— gờ bao —— */
+const borderMat = new THREE.MeshStandardMaterial({ color: 0xf6d36a, metalness: .95, roughness: .18 });
+const BORDER_WIDTH = S * .20;
+const BORDER_HEIGHT = .22;
+function borderLine(x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy);
+  if (L <= 0) return;
+  const g = new THREE.BoxGeometry(L * S, BORDER_HEIGHT, BORDER_WIDTH);
+  const m = new THREE.Mesh(g, borderMat);
+  m.position.copy(P((x1 + x2) / 2, (y1 + y2) / 2, .16));
+  m.rotation.y = -Math.atan2(dy, dx);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  scene.add(m);
+}
+function borderRect(x, y, w, h) {
+  borderLine(x, y, x + w, y);
+  borderLine(x + w, y, x + w, y + h);
+  borderLine(x + w, y + h, x, y + h);
+  borderLine(x, y + h, x, y);
+}
+borderRect(0, 0, 40, 40);
+borderRect(0, 0, 14, 14);
+borderRect(0, 26, 14, 14);
+borderRect(26, 26, 14, 14);
+borderRect(26, 0, 14, 14);
+borderLine(18, 18, 22, 22);
+borderLine(18, 22, 22, 18);
+const E0 = 2.5, E1 = 37.5;
+borderLine(18, 22, 18, E1);
+borderLine(22, 22, 22, E1);
+borderLine(18, 18, 18, E0);
+borderLine(22, 18, 22, E0);
+borderLine(18, 18, E0, 18);
+borderLine(18, 22, E0, 22);
+borderLine(22, 18, E1, 18);
+borderLine(22, 22, E1, 22);
+borderLine(18, E1, 22, E1);
+borderLine(18, E0, 22, E0);
+borderLine(E0, 18, E0, 22);
+borderLine(E1, 18, E1, 22);
+
+/* —— OrbitControls —— */
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0);
+controls.enableDamping = true;
+controls.dampingFactor = .08;
+controls.enablePan = false;
+controls.enableRotate = true;
+controls.enableZoom = true;
+controls.maxPolarAngle = 1.45;
+controls.minPolarAngle = .30;
+function setPhoneZoomLimits() {
+  const halfBoard = W / 2;
+  const halfFovY = THREE.MathUtils.degToRad(camera.fov / 2);
+  const minD = halfBoard / Math.tan(halfFovY);
+  const v = halfFovY;
+  const halfFovX = Math.atan(Math.tan(v) * camera.aspect);
+  const maxD = halfBoard / Math.tan(halfFovX);
+  controls.minDistance = minD;
+  controls.maxDistance = Math.max(minD + .01, maxD);
+}
+camera.position.set(0, 31, 29);
+setPhoneZoomLimits();
+controls.update();
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  setPhoneZoomLimits();
+  controls.update();
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   PENS + HORSES
+   Đường kính đáy = 2 (grid units) → world diam = 2*S
+   size = (2*S) / 8
+   Lưới đặt quân: step 2, inset 2 → không chồng tường (radius 1)
+   ═══════════════════════════════════════════════════════════════ */
+const HORSE_BASE_DIAM_GRID = 2;
+const HORSE_SIZE = (HORSE_BASE_DIAM_GRID * S) / HORSE_STANDARD.BASE_DIAMETER;
+const MIN_CENTER_DIST = HORSE_BASE_DIAM_GRID; // grid units
+
+/* 4 chuồng: origin (x0,y0), màu ngựa, hướng ban đầu */
+const PENS = [
+  { id: 0, x0: 0,  y0: 0,  color: 0x1a1a1a, name: 'Đen',   heading: HEADING.NORTH }, // black gloss
+  { id: 1, x0: 26, y0: 26, color: 0xe8e0c8, name: 'Ngà',   heading: HEADING.SOUTH }, // ivory
+  { id: 2, x0: 26, y0: 0,  color: 0xdc2626, name: 'Đỏ',    heading: HEADING.WEST  }, // flag red
+  { id: 3, x0: 0,  y0: 26, color: 0x1e6fff, name: 'Xanh',  heading: HEADING.EAST  }  // sky blue
+];
+
+/** Sinh tất cả điểm lưới hợp lệ trong chuồng (không chồng tường). */
+function penGridSlots(pen) {
+  const slots = [];
+  // step 2, từ 2 → 12 (cách mép ≥ 2 grid units → bán kính 1 an toàn)
+  for (let i = 2; i <= 12; i += 2) {
+    for (let j = 2; j <= 12; j += 2) {
+      slots.push({ gx: pen.x0 + i, gy: pen.y0 + j });
+    }
+  }
+  return slots;
+}
+
+/** 4 vị trí xuất phát ban đầu (góc trong của lưới 6×6). */
+function initialSlots(pen) {
+  return [
+    { gx: pen.x0 + 4,  gy: pen.y0 + 4  },
+    { gx: pen.x0 + 4,  gy: pen.y0 + 10 },
+    { gx: pen.x0 + 10, gy: pen.y0 + 4  },
+    { gx: pen.x0 + 10, gy: pen.y0 + 10 }
+  ];
+}
+
+const allHorses = [];
+const horseByRoot = new Map();
+
+PENS.forEach(pen => {
+  const inits = initialSlots(pen);
+  inits.forEach((slot, idx) => {
+    const wp = P(slot.gx, slot.gy, 0);
+    const horse = new Horse3D({
+      color: pen.color,
+      material: 'plastic',
+      size: HORSE_SIZE,
+      heading: pen.heading,
+      position: { x: wp.x, y: 0, z: wp.z },
+      penId: pen.id
+    });
+    horse.gridX = slot.gx;
+    horse.gridY = slot.gy;
+    horse.addTo(scene);
+    allHorses.push(horse);
+    horseByRoot.set(horse.root, horse);
+  });
+});
+
+/* —— markers (dấu chấm vị trí khả thi) —— */
+const markerGroup = new THREE.Group();
+scene.add(markerGroup);
+const markerGeo = new THREE.SphereGeometry(S * 0.38, 16, 12);
+const markerMat = new THREE.MeshPhysicalMaterial({
+  color: 0xffe066, metalness: 0.2, roughness: 0.25,
+  emissive: 0xffc000, emissiveIntensity: 0.55,
+  transparent: true, opacity: 0.92
+});
+let activeMarkers = []; // { mesh, gx, gy }
+
+function clearMarkers() {
+  while (markerGroup.children.length) {
+    const m = markerGroup.children[0];
+    markerGroup.remove(m);
+    m.geometry?.dispose?.();
+  }
+  activeMarkers = [];
+}
+
+function showValidMarkers(horse) {
+  clearMarkers();
+  const pen = PENS[horse.penId];
+  if (!pen) return;
+  const occupied = new Set();
+  allHorses.forEach(h => {
+    if (h.penId === horse.penId && h !== horse) {
+      occupied.add(h.gridX + ',' + h.gridY);
+    }
+  });
+  const slots = penGridSlots(pen);
+  slots.forEach(s => {
+    const key = s.gx + ',' + s.gy;
+    if (occupied.has(key)) return;
+    // không cần check tường vì grid đã inset
+    // khoảng cách tới các quân khác đã đảm bảo bằng grid step + occupied
+    const wp = P(s.gx, s.gy, 0.12);
+    const mesh = new THREE.Mesh(markerGeo, markerMat.clone());
+    mesh.position.copy(wp);
+    mesh.userData.marker = true;
+    mesh.userData.gx = s.gx;
+    mesh.userData.gy = s.gy;
+    markerGroup.add(mesh);
+    activeMarkers.push({ mesh, gx: s.gx, gy: s.gy });
+  });
+}
+
+/* —— interaction —— */
+let selectedHorse = null;
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let pointerDownPos = null;
+const CLICK_THRESH = 8; // px
+
+/* Âm thanh: a2.mp3 khi chọn quân, a1.mp3 khi nhảy xong (cùng thư mục với HTML) */
+const sfxSelect = new Audio('a2.mp3');
+const sfxLand = new Audio('a1.mp3');
+sfxSelect.preload = 'auto';
+sfxLand.preload = 'auto';
+function playSfx(audio) {
+  try {
+    audio.pause();
+    audio.currentTime = 0;
+    const p = audio.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch (_) {}
+}
+
+function getPointerNDC(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  const cx = (e.clientX !== undefined) ? e.clientX : (e.touches ? e.touches[0].clientX : e.changedTouches[0].clientX);
+  const cy = (e.clientY !== undefined) ? e.clientY : (e.touches ? e.touches[0].clientY : e.changedTouches[0].clientY);
+  pointer.x = ((cx - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((cy - rect.top) / rect.height) * 2 + 1;
+  return { x: cx, y: cy };
+}
+
+function deselect() {
+  if (selectedHorse) {
+    selectedHorse.stop('idle');
+    selectedHorse = null;
+  }
+  clearMarkers();
+}
+
+function selectHorse(horse) {
+  if (selectedHorse === horse) return;
+  deselect();
+  selectedHorse = horse;
+  playSfx(sfxSelect);
+  horse.play('idle', { duration: 2.2 });
+  showValidMarkers(horse);
+}
+
+async function moveHorseTo(horse, gx, gy) {
+  if (horse.busy) return;
+  const wp = P(gx, gy, 0);
+  clearMarkers();
+  horse.stop('idle');
+  // nhảy hình sin (arc)
+  const dist = Math.hypot(gx - horse.gridX, gy - horse.gridY);
+  const jumpH = 3.2 + Math.min(dist * 0.35, 4);
+  await horse.play('jump', {
+    to: { x: wp.x, z: wp.z },
+    height: jumpH / horse.size, // play nhân thêm size
+    duration: 0.55 + dist * 0.08,
+    face: true
+  });
+  playSfx(sfxLand);
+  horse.gridX = gx;
+  horse.gridY = gy;
+  selectedHorse = null;
+}
+
+function onPointerDown(e) {
+  const p = getPointerNDC(e);
+  pointerDownPos = { x: p.x, y: p.y };
+}
+
+function onPointerUp(e) {
+  if (!pointerDownPos) return;
+  const p = getPointerNDC(e);
+  const dx = p.x - pointerDownPos.x, dy = p.y - pointerDownPos.y;
+  pointerDownPos = null;
+  if (Math.hypot(dx, dy) > CLICK_THRESH) return; // drag → orbit, bỏ qua
+
+  raycaster.setFromCamera(pointer, camera);
+
+  // 1) ưu tiên marker
+  if (activeMarkers.length && selectedHorse) {
+    const markerMeshes = activeMarkers.map(m => m.mesh);
+    const hits = raycaster.intersectObjects(markerMeshes, false);
+    if (hits.length) {
+      const m = hits[0].object;
+      moveHorseTo(selectedHorse, m.userData.gx, m.userData.gy);
+      return;
+    }
+  }
+
+  // 2) chọn quân
+  const horseRoots = allHorses.map(h => h.root);
+  const hits = raycaster.intersectObjects(horseRoots, true);
+  if (hits.length) {
+    let obj = hits[0].object;
+    while (obj && !obj.userData.horse3d) obj = obj.parent;
+    if (obj && obj.userData.horse3d) {
+      const h = obj.userData.horse3d;
+      if (h.busy) return;
+      selectHorse(h);
+      return;
+    }
+  }
+
+  // 3) click trống → bỏ chọn
+  deselect();
+}
+
+renderer.domElement.addEventListener('pointerdown', onPointerDown, { passive: true });
+renderer.domElement.addEventListener('pointerup', onPointerUp, { passive: true });
+
+/* —— loop —— */
+let lastT = performance.now();
+(function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = (now - lastT) / 1000;
+  lastT = now;
+  allHorses.forEach(h => h.update(dt));
+  // nhẹ nhàng nhấp nháy markers
+  const pulse = 0.85 + 0.15 * Math.sin(now * 0.006);
+  activeMarkers.forEach(m => { m.mesh.scale.setScalar(pulse); });
+  controls.update();
+  renderer.render(scene, camera);
+})(performance.now());
+</script>
+</body>
+</html>
