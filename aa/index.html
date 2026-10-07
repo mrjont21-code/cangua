@@ -1,0 +1,1232 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Cá Ngựa 3D</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#12080a;font-family:system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
+#boardFrame{position:fixed;inset:0;border:0;width:100%;height:100%;background:#080704;z-index:1;display:none}
+#hud{position:fixed;left:0;right:0;top:0;padding:10px 14px;display:none;flex-direction:column;align-items:flex-start;gap:6px;
+ background:linear-gradient(180deg,rgba(0,0,0,.55),transparent);pointer-events:none;z-index:5}
+#hudRow{display:flex;gap:8px;align-items:center;pointer-events:none}
+.badge{padding:7px 14px;border-radius:10px;font-weight:800;font-size:14px;color:#fff;border:1px solid rgba(255,255,255,.2)}
+#btnAuto{pointer-events:auto;padding:6px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.25);
+ background:rgba(0,0,0,.55);color:#fde68a;font-weight:700;font-size:12px;cursor:pointer;touch-action:manipulation;display:none}
+#btnAuto.on{background:#16a34a;color:#fff}
+.popup-wrap{position:fixed;inset:0;display:none;place-items:center;z-index:30;background:rgba(0,0,0,.35)}
+.popup-wrap.show{display:grid}
+.popup-wrap.mini{inset:auto;top:8px;right:8px;left:auto;bottom:auto;place-items:start;background:transparent;padding:0;z-index:35}
+.popup-wrap.mini .popup-panel{gap:6px;padding:8px;background:rgba(0,0,0,.72);border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.45);max-width:42vw}
+.popup-wrap.mini .popup-btn{min-width:0;width:100%;padding:10px 12px;font-size:13px;border-radius:10px}
+.popup-wrap.mini #btnMinimize{display:none}
+.popup-panel{display:flex;flex-direction:column;gap:12px;align-items:stretch;padding:16px;max-width:92vw}
+.popup-btn{
+  min-width:min(78vw,320px);padding:20px 24px;border:0;border-radius:18px;font-size:20px;font-weight:900;
+  cursor:pointer;touch-action:manipulation;color:#1c1005;
+  background-color:#fbbf24;
+  background-image:linear-gradient(180deg,rgba(255,255,255,.28),rgba(0,0,0,.12));
+  border-bottom:4px solid rgba(0,0,0,.35);
+  box-shadow:0 10px 28px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.4);
+}
+.popup-btn.exit{background-color:#16a34a;color:#fff}
+.popup-btn.move{background-color:#fbbf24;color:#111}
+.popup-btn.kick,.popup-btn.kick_rear,.popup-btn.fly_kick{background-color:#dc2626;color:#fff}
+.popup-btn.fly{background-color:#7c3aed;color:#fff}
+.popup-btn.home{background-color:#2563eb;color:#fff}
+.popup-btn.mini-btn{background-color:#444;color:#fde68a;font-size:15px;padding:12px}
+.popup-btn:active{transform:translateY(3px) scale(.98);border-bottom-width:1px;box-shadow:0 4px 12px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.2)}
+#slideLayer{position:fixed;inset:0;display:none;z-index:40;background:#000}
+#slideLayer.show{display:block}
+#slideFrame{position:absolute;inset:0;border:0;width:100%;height:100%}
+#miniDice{position:fixed;top:8px;right:8px;z-index:35;display:none;width:min(31.5vw,150px);aspect-ratio:1/1.1;border-radius:14px;overflow:hidden;background:rgba(0,0,0,.72);box-shadow:0 8px 24px rgba(0,0,0,.45);border:2px solid var(--seat-color,#fbbf24);pointer-events:none}
+#miniDice.show{display:block}
+#miniDice iframe{width:100%;height:100%;border:0;pointer-events:none}
+#setup{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#12080a;z-index:100;color:#fde68a;padding:16px;box-sizing:border-box}
+#setup h1{margin:0 0 16px;font-size:22px;color:#f6d36a}
+.setupLabel{font-size:12px;letter-spacing:1px;opacity:.75;margin:14px 0 8px;text-align:center}
+#setup .row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+#setup button{
+  padding:16px 22px;border-radius:16px;border:0;border-bottom:4px solid rgba(0,0,0,.4);
+  background-color:#1a1010;background-image:linear-gradient(180deg,rgba(255,255,255,.12),rgba(0,0,0,.2));
+  color:#fde68a;font-weight:700;font-size:16px;min-width:100px;min-height:48px;cursor:pointer;touch-action:manipulation;
+  box-shadow:0 8px 20px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.15);
+  border:1px solid #d4af37;border-bottom:4px solid rgba(0,0,0,.45);
+}
+#setup button:active{transform:translateY(2px);border-bottom-width:1px}
+#win{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.88);z-index:60;color:#fde68a;font-size:26px;font-weight:900;flex-direction:column;gap:16px}
+#win.show{display:grid}
+#win button{padding:14px 22px;border-radius:14px;border:1px solid #d4af37;background:#1a1010;color:#fde68a;font-weight:700;font-size:15px;cursor:pointer}
+
+.mode-active{outline:2px solid #d4af37;background:#2a1a0a!important}
+.skill-sheet{position:fixed;inset:0;z-index:80;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.55)}
+.skill-sheet-panel{width:100%;max-width:480px;max-height:78vh;overflow:auto;background:#1a1210;border-radius:18px 18px 0 0;padding:16px 14px 22px;border:1px solid #d4af37;box-shadow:0 -8px 30px rgba(0,0,0,.5)}
+.skill-sheet-title{font-weight:800;color:#fde68a;text-align:center;margin-bottom:12px;font-size:16px}
+.skill-systems{display:flex;gap:8px;justify-content:center;margin-bottom:10px;flex-wrap:wrap}
+.skill-systems button{padding:6px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.2);background:#222;color:#eee;font-size:12px;font-weight:700}
+.skill-systems button.active{border-color:#d4af37;color:#fde68a}
+.skill-cards{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 12px;scroll-snap-type:x mandatory}
+.skill-card{flex:0 0 140px;scroll-snap-align:start;background:#241816;border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:10px;color:#eee;cursor:pointer}
+.skill-card.selected{border-color:#d4af37;box-shadow:0 0 0 2px rgba(212,175,55,.35)}
+.skill-card .sk-name{font-weight:800;font-size:13px;margin:4px 0}
+.skill-card .sk-short{font-size:11px;opacity:.85;line-height:1.3}
+.skill-detail{min-height:48px;font-size:12px;color:#fde68a;margin:8px 0 12px;line-height:1.4}
+#btnConfirmSkill{width:100%}
+#modeBadge{font-size:11px;opacity:.9;margin-left:6px}
+
+#errBox{position:fixed;left:8px;right:8px;bottom:8px;z-index:200;display:none;padding:10px;border-radius:8px;background:rgba(80,0,0,.9);color:#fecaca;font-size:12px}
+</style>
+</head>
+<body>
+<div id="setup">
+  <h1>Cá Ngựa 3D</h1>
+  <div class="setupLabel">CHẾ ĐỘ LUẬT</div>
+  <div class="row" id="ruleModeRow">
+    <button type="button" id="btnClassic" class="mode-active">Truyền thống</button>
+    <button type="button" id="btnAdvanced">Nâng cao</button>
+  </div>
+  <div class="setupLabel">CHƠI CHUNG 1 MÁY</div>
+  <div class="row">
+    <button type="button" id="btn2">2</button>
+    <button type="button" id="btn3">3</button>
+    <button type="button" id="btn4">4</button>
+  </div>
+  <div class="setupLabel">CHƠI VỚI MÁY</div>
+  <div class="row">
+    <button type="button" id="btnBot1">1 MÁY</button>
+    <button type="button" id="btnBot2">2 MÁY</button>
+    <button type="button" id="btnBot3">3 MÁY</button>
+  </div>
+</div>
+<div id="skillSheet" class="skill-sheet" style="display:none">
+  <div class="skill-sheet-panel">
+    <div class="skill-sheet-title">CHỌN KỸ NĂNG CHO NGỰA</div>
+    <div id="skillSystems" class="skill-systems"></div>
+    <div id="skillCards" class="skill-cards"></div>
+    <div id="skillDetail" class="skill-detail"></div>
+    <button type="button" id="btnConfirmSkill" class="popup-btn" disabled>XÁC NHẬN</button>
+  </div>
+</div>
+<iframe id="boardFrame" src="about:blank" allow="autoplay"></iframe>
+<div id="hud">
+  <div id="hudRow">
+    <span id="turnBadge" class="badge">—</span>
+    <span id="diceBadge" class="badge" style="background:#333">—</span>
+  </div>
+  <button type="button" id="btnAuto">TỰ ĐỘNG: TẮT</button>
+</div>
+<div id="popupRoll" class="popup-wrap">
+  <div class="popup-panel"><button type="button" class="popup-btn" id="btnRoll">LẮC</button></div>
+</div>
+<div id="popupAction" class="popup-wrap">
+  <div class="popup-panel" id="actionPanel"></div>
+</div>
+<div id="slideLayer"><iframe id="slideFrame" src="about:blank" allow="autoplay"></iframe></div>
+<div id="miniDice"><iframe id="miniDiceFrame" src="about:blank" allow="autoplay"></iframe></div>
+<div id="win"><div id="winText"></div><button type="button" id="btnDownloadLog">TẢI LOG</button></div>
+<div id="errBox"></div>
+<script>
+/**
+ * board-data.js — Toạ độ logic bàn Cá Ngựa 3D
+ * Grid 40×40, tâm (20,20). Nhìn từ trên: +X phải, +Y lên. Hướng chạy: ngược chiều kim đồng hồ.
+ */
+(function (global) {
+  'use strict';
+
+  const COLORS = [
+    { id: 0, key: 'yellow', name: 'Vàng', hex: 0xfff000, css: '#fff000', pen: { x0: 0, y0: 0 }, heading: 90 },
+    { id: 1, key: 'cyan',   name: 'Xanh ngọc', hex: 0x0bd9ce, css: '#0bd9ce', pen: { x0: 26, y0: 26 }, heading: -90 },
+    { id: 2, key: 'red',    name: 'Đỏ',   hex: 0xc00000, css: '#c00000', pen: { x0: 26, y0: 0 }, heading: 180 },
+    { id: 3, key: 'blue',   name: 'Xanh', hex: 0x2012e0, css: '#2012e0', pen: { x0: 0, y0: 26 }, heading: 0 }
+  ];
+
+  /** Ô xuất phát (đáy-trái mỗi chuồng trên path) */
+  const START = {
+    0: { gx: 1, gy: 16 },   // Đen
+    1: { gx: 39, gy: 24 },  // Ngà
+    2: { gx: 24, gy: 1 },   // Đỏ
+    3: { gx: 16, gy: 39 }   // Xanh
+  };
+
+  /** Ô lên chuồng (mũi tên) — ô cuối path trước khi vào home */
+  const ENTRY = {
+    0: { gx: 1, gy: 20 },
+    1: { gx: 39, gy: 20 },
+    2: { gx: 20, gy: 1 },
+    3: { gx: 20, gy: 39 }
+  };
+
+  /** Home 1→6 (index 0 = ô 1) */
+  const HOME = {
+    0: [ // Đen — phải → tâm
+      { gx: 4, gy: 20 }, { gx: 6.8, gy: 20 }, { gx: 9.6, gy: 20 },
+      { gx: 12.4, gy: 20 }, { gx: 15.2, gy: 20 }, { gx: 18, gy: 20 }
+    ],
+    1: [ // Ngà — trái → tâm
+      { gx: 36, gy: 20 }, { gx: 33.2, gy: 20 }, { gx: 30.4, gy: 20 },
+      { gx: 27.6, gy: 20 }, { gx: 24.8, gy: 20 }, { gx: 22, gy: 20 }
+    ],
+    2: [ // Đỏ — lên → tâm
+      { gx: 20, gy: 4 }, { gx: 20, gy: 6.8 }, { gx: 20, gy: 9.6 },
+      { gx: 20, gy: 12.4 }, { gx: 20, gy: 15.2 }, { gx: 20, gy: 18 }
+    ],
+    3: [ // Xanh — xuống → tâm
+      { gx: 20, gy: 36 }, { gx: 20, gy: 33.2 }, { gx: 20, gy: 30.4 },
+      { gx: 20, gy: 27.6 }, { gx: 20, gy: 24.8 }, { gx: 20, gy: 22 }
+    ]
+  };
+
+  /**
+   * PATH[colorId]: 48 ô, index 0 = START, index 47 = ENTRY.
+   * Đi ngược chiều kim đồng hồ.
+   */
+  const PATH = {
+    2: [ // Đỏ — 56 ô, START→ENTRY; 13 nút quanh chuồng
+      [24,1],[24,3.5],[24,6],[24,8.5],[24,11],[24,13.5],[24,16],
+      [26.5,16],[29,16],[31.5,16],[34,16],[36.5,16],[39,16],
+      [39,20],[39,24],
+      [36.5,24],[34,24],[31.5,24],[29,24],[26.5,24],[24,24],
+      [24,26.5],[24,29],[24,31.5],[24,34],[24,36.5],[24,39],
+      [20,39],[16,39],
+      [16,36.5],[16,34],[16,31.5],[16,29],[16,26.5],[16,24],
+      [13.5,24],[11,24],[8.5,24],[6,24],[3.5,24],[1,24],
+      [1,20],[1,16],
+      [3.5,16],[6,16],[8.5,16],[11,16],[13.5,16],[16,16],
+      [16,13.5],[16,11],[16,8.5],[16,6],[16,3.5],[16,1],[20,1]
+    ],
+    1: [ // Ngà
+      [39,24],[36.5,24],[34,24],[31.5,24],[29,24],[26.5,24],[24,24],
+      [24,26.5],[24,29],[24,31.5],[24,34],[24,36.5],[24,39],
+      [20,39],[16,39],
+      [16,36.5],[16,34],[16,31.5],[16,29],[16,26.5],[16,24],
+      [13.5,24],[11,24],[8.5,24],[6,24],[3.5,24],[1,24],
+      [1,20],[1,16],
+      [3.5,16],[6,16],[8.5,16],[11,16],[13.5,16],[16,16],
+      [16,13.5],[16,11],[16,8.5],[16,6],[16,3.5],[16,1],
+      [20,1],[24,1],
+      [24,3.5],[24,6],[24,8.5],[24,11],[24,13.5],[24,16],
+      [26.5,16],[29,16],[31.5,16],[34,16],[36.5,16],[39,16],[39,20]
+    ],
+    3: [ // Xanh
+      [16,39],[16,36.5],[16,34],[16,31.5],[16,29],[16,26.5],[16,24],
+      [13.5,24],[11,24],[8.5,24],[6,24],[3.5,24],[1,24],
+      [1,20],[1,16],
+      [3.5,16],[6,16],[8.5,16],[11,16],[13.5,16],[16,16],
+      [16,13.5],[16,11],[16,8.5],[16,6],[16,3.5],[16,1],
+      [20,1],[24,1],
+      [24,3.5],[24,6],[24,8.5],[24,11],[24,13.5],[24,16],
+      [26.5,16],[29,16],[31.5,16],[34,16],[36.5,16],[39,16],
+      [39,20],[39,24],
+      [36.5,24],[34,24],[31.5,24],[29,24],[26.5,24],[24,24],
+      [24,26.5],[24,29],[24,31.5],[24,34],[24,36.5],[24,39],[20,39]
+    ],
+    0: [ // Đen
+      [1,16],[3.5,16],[6,16],[8.5,16],[11,16],[13.5,16],[16,16],
+      [16,13.5],[16,11],[16,8.5],[16,6],[16,3.5],[16,1],
+      [20,1],[24,1],
+      [24,3.5],[24,6],[24,8.5],[24,11],[24,13.5],[24,16],
+      [26.5,16],[29,16],[31.5,16],[34,16],[36.5,16],[39,16],
+      [39,20],[39,24],
+      [36.5,24],[34,24],[31.5,24],[29,24],[26.5,24],[24,24],
+      [24,26.5],[24,29],[24,31.5],[24,34],[24,36.5],[24,39],
+      [20,39],[16,39],
+      [16,36.5],[16,34],[16,31.5],[16,29],[16,26.5],[16,24],
+      [13.5,24],[11,24],[8.5,24],[6,24],[3.5,24],[1,24],[1,20]
+    ]
+  };
+
+  /** 4 vị trí ban đầu trong chuồng (grid) */
+  function penSlots(colorId) {
+    const p = COLORS[colorId].pen;
+    return [
+      { gx: p.x0 + 4, gy: p.y0 + 4 },
+      { gx: p.x0 + 4, gy: p.y0 + 10 },
+      { gx: p.x0 + 10, gy: p.y0 + 4 },
+      { gx: p.x0 + 10, gy: p.y0 + 10 }
+    ];
+  }
+
+  function pathLen(colorId) {
+    return PATH[colorId].length; // 48
+  }
+
+  function cellAt(colorId, pathIndex) {
+    const p = PATH[colorId][pathIndex];
+    return p ? { gx: p[0], gy: p[1] } : null;
+  }
+
+  function homeCell(colorId, homeIndex1to6) {
+    return HOME[colorId][homeIndex1to6 - 1] || null;
+  }
+
+  global.BoardData = {
+    COLORS, START, ENTRY, HOME, PATH,
+    penSlots, pathLen, cellAt, homeCell
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/**
+ * rules.js
+ * - START không đếm trên đường đi thường; đá hậu ĐƯỢC đi lùi qua START
+ * - Đá hậu: chỉ khi xúc = đúng khoảng cách hữu ích phía sau + không vật cản
+ * - Lên chuồng: chỉ từ ENTRY; lần đầu xúc N → home N; sau đó xúc đúng số bậc đích
+ * - ENTRY là điểm cuối path, không đi quá
+ */
+(function (global) {
+  'use strict';
+  const BD = () => global.BoardData;
+
+  function createHorseState(colorId, slotIndex) {
+    const slot = BD().penSlots(colorId)[slotIndex];
+    return {
+      id: colorId * 4 + slotIndex, colorId, slotIndex,
+      zone: 'pen', pathIndex: -1, homeIndex: 0,
+      gx: slot.gx, gy: slot.gy
+    };
+  }
+
+  function createGameState(numPlayers) {
+    const n = Math.max(2, Math.min(4, numPlayers || 4));
+    const order = [2, 3, 1, 0].slice(0, n);
+    const horses = [];
+    order.forEach((cid) => { for (let s = 0; s < 4; s++) horses.push(createHorseState(cid, s)); });
+    return {
+      players: order.map((cid, i) => ({ colorId: cid, name: BD().COLORS[cid].name, index: i })),
+      horses, current: 0, dice: 0, phase: 'turn', winner: null, extraTurn: false
+    };
+  }
+
+  function horsesOf(state, colorId) {
+    return state.horses.filter((h) => h.colorId === colorId);
+  }
+
+  function occupantAt(state, gx, gy, exceptId) {
+    const eps = 0.25;
+    return state.horses.find((h) =>
+      h.id !== exceptId && h.zone !== 'pen' && h.zone !== 'done' &&
+      Math.abs(h.gx - gx) < eps && Math.abs(h.gy - gy) < eps
+    );
+  }
+
+  function isStartCell(gx, gy) {
+    const eps = 0.3, S = BD().START;
+    for (const k of Object.keys(S)) {
+      const s = S[k];
+      if (Math.abs(s.gx - gx) < eps && Math.abs(s.gy - gy) < eps) return true;
+    }
+    return false;
+  }
+
+  /** Tiến hữu ích: bỏ START (không đếm), không vượt ENTRY */
+  function usefulForward(colorId, fromIdx, maxSteps) {
+    const len = BD().pathLen(colorId);
+    const cells = [];
+    let idx = fromIdx;
+    while (cells.length < maxSteps) {
+      idx++;
+      if (idx >= len) break; // không đi quá ENTRY
+      const c = BD().cellAt(colorId, idx);
+      if (!c) break;
+      if (isStartCell(c.gx, c.gy) && idx !== 0) continue;
+      cells.push({ gx: c.gx, gy: c.gy, pathIndex: idx });
+    }
+    return cells;
+  }
+
+  /**
+   * Lùi hữu ích cho đá hậu: KHÔNG đếm ô START (giống di chuyển).
+   * Được đi lùi qua vùng START nhưng START không tính bước.
+   * Không đá được quân đang đứng trên START.
+   */
+  function usefulBackward(colorId, fromIdx, maxSteps) {
+    const cells = [];
+    let idx = fromIdx;
+    while (cells.length < maxSteps && idx > 0) {
+      idx--;
+      const c = BD().cellAt(colorId, idx);
+      if (!c) break;
+      // START không đếm bước (trừ index 0 là START của chính mình khi xuất — vẫn skip khi lùi)
+      if (isStartCell(c.gx, c.gy)) continue;
+      cells.push({ gx: c.gx, gy: c.gy, pathIndex: idx });
+    }
+    return cells;
+  }
+
+  function blockedMid(state, horse, cellsExceptLast) {
+    for (let i = 0; i < cellsExceptLast.length; i++) {
+      const c = cellsExceptLast[i];
+      if (isStartCell(c.gx, c.gy)) continue;
+      if (occupantAt(state, c.gx, c.gy, horse.id)) return true;
+    }
+    return false;
+  }
+
+  /** Chặn giữa đá hậu: ô START đã bị bỏ khi đếm; quân trên ô thường thì chặn */
+  function blockedMidRear(state, horse, cellsExceptLast) {
+    for (let i = 0; i < cellsExceptLast.length; i++) {
+      const c = cellsExceptLast[i];
+      if (isStartCell(c.gx, c.gy)) continue;
+      if (occupantAt(state, c.gx, c.gy, horse.id)) return true;
+    }
+    return false;
+  }
+
+  function movesForHorse(state, horse, dice) {
+    const moves = [];
+    if (!horse || dice < 1 || dice > 6) return moves;
+    const len = BD().pathLen(horse.colorId);
+
+    // —— Xuất quân ——
+    if (horse.zone === 'pen') {
+      if (dice === 6) {
+        const st = BD().START[horse.colorId];
+        const occ = occupantAt(state, st.gx, st.gy, horse.id);
+        if (!(occ && occ.colorId === horse.colorId)) {
+          moves.push({
+            type: 'exit', horseId: horse.id, horseSlot: horse.slotIndex,
+            toGx: st.gx, toGy: st.gy, pathIndex: 0, steps: 1,
+            cells: [{ gx: st.gx, gy: st.gy }],
+            kickId: occ && occ.colorId !== horse.colorId ? occ.id : null
+          });
+        }
+      }
+      return moves;
+    }
+
+    // —— Trong home ——
+    // Lần đầu đã vào (homeIndex >= 1): chỉ lên bậc đích khi xúc ĐÚNG số bậc đó
+    // Ví dụ đang ở 3 → xúc 4 mới lên 4; xúc 5 mới lên 5; xúc 6 mới lên 6
+    if (horse.zone === 'home') {
+      if (horse.homeIndex >= 1 && horse.homeIndex < 6) {
+        const target = dice; // xúc N → chỉ lên đúng bậc N
+        if (target > horse.homeIndex && target <= 6) {
+          // chỉ cho phép nếu đích = dice và các bậc trung gian trống? 
+          // Theo user: xúc 4 → lên bậc 4 (từ 3). Không nhảy 3→5 bằng xúc 5 nếu... user said xúc 5 → bậc 5.
+          // Vậy từ 3, xúc 5 → lên 5 (có thể nhảy qua 4?) User said "bắt buộc phải lên từng bậc 4,5,6" 
+          // AND "điều kiện lên bậc 4 là mặt 4". So from 3 only dice 4 works to go to 4.
+          // From 4 only dice 5. From 5 only dice 6.
+          // Cannot skip: only target === homeIndex + 1 && dice === target
+          if (target === horse.homeIndex + 1) {
+            const cell = BD().homeCell(horse.colorId, target);
+            if (cell && !occupantAt(state, cell.gx, cell.gy, horse.id)) {
+              moves.push({
+                type: 'home', horseId: horse.id, horseSlot: horse.slotIndex,
+                toGx: cell.gx, toGy: cell.gy, homeIndex: target,
+                steps: 1, cells: [{ gx: cell.gx, gy: cell.gy }], kickId: null
+              });
+            }
+          }
+        }
+      }
+      return moves;
+    }
+
+    if (horse.zone !== 'track') return moves;
+
+    // —— Đá hậu: xúc = đúng khoảng cách lùi + không vật cản ——
+    {
+      const back = usefulBackward(horse.colorId, horse.pathIndex, dice);
+      if (back.length === dice) {
+        const mid = back.slice(0, -1);
+        if (!blockedMidRear(state, horse, mid)) {
+          const last = back[back.length - 1];
+          const occ = occupantAt(state, last.gx, last.gy, horse.id);
+          // Không đá quân đang đứng trên ô xuất quân
+          if (occ && occ.colorId !== horse.colorId && !isStartCell(last.gx, last.gy)) {
+            moves.push({
+              type: 'kick_rear', horseId: horse.id, horseSlot: horse.slotIndex,
+              toGx: last.gx, toGy: last.gy, pathIndex: last.pathIndex,
+              steps: back.length,
+              cells: back.map((c) => ({ gx: c.gx, gy: c.gy })),
+              kickId: occ.id, backward: true
+            });
+          }
+        }
+      }
+    }
+
+    // —— Bay / Đá bay (xúc 1): ENTRY gần nhất CCW ——
+    if (dice === 1 && horse.pathIndex < len - 1) {
+      const entries = BD().ENTRY;
+      function isAnyEntry(gx, gy) {
+        const eps = 0.35;
+        for (const k of Object.keys(entries)) {
+          const e = entries[k];
+          if (Math.abs(e.gx - gx) < eps && Math.abs(e.gy - gy) < eps) return true;
+        }
+        return false;
+      }
+      const forward = usefulForward(horse.colorId, horse.pathIndex, 99);
+      let clear = true;
+      let target = null;
+      for (let i = 0; i < forward.length; i++) {
+        const c = forward[i];
+        if (!isAnyEntry(c.gx, c.gy)) {
+          if (occupantAt(state, c.gx, c.gy, horse.id)) { clear = false; break; }
+          continue;
+        }
+        target = c;
+        break;
+      }
+      if (clear && target) {
+        const occ = occupantAt(state, target.gx, target.gy, horse.id);
+        if (!occ) {
+          moves.push({
+            type: 'fly', horseId: horse.id, horseSlot: horse.slotIndex,
+            toGx: target.gx, toGy: target.gy, pathIndex: target.pathIndex,
+            steps: 1, cells: [{ gx: target.gx, gy: target.gy }],
+            kickId: null, fly: true
+          });
+        } else if (occ.colorId !== horse.colorId) {
+          moves.push({
+            type: 'fly_kick', horseId: horse.id, horseSlot: horse.slotIndex,
+            toGx: target.gx, toGy: target.gy, pathIndex: target.pathIndex,
+            steps: 1, cells: [{ gx: target.gx, gy: target.gy }],
+            kickId: occ.id, fly: true
+          });
+        }
+      }
+    }
+
+    // —— Di chuyển / đá tiến: không vượt ENTRY ——
+    {
+      const cells = usefulForward(horse.colorId, horse.pathIndex, dice);
+      if (cells.length === dice) {
+        const mid = cells.slice(0, -1);
+        if (!blockedMid(state, horse, mid)) {
+          const last = cells[cells.length - 1];
+          const occ = occupantAt(state, last.gx, last.gy, horse.id);
+          if (!(occ && occ.colorId === horse.colorId)) {
+            moves.push({
+              type: occ ? 'kick' : 'move', horseId: horse.id, horseSlot: horse.slotIndex,
+              toGx: last.gx, toGy: last.gy, pathIndex: last.pathIndex,
+              steps: cells.length,
+              cells: cells.map((c) => ({ gx: c.gx, gy: c.gy })),
+              kickId: occ ? occ.id : null
+            });
+          }
+        }
+      }
+    }
+
+    // —— Lên chuồng lần đầu: CHỈ khi đứng đúng ENTRY (pathIndex === len-1) ——
+    // Xúc N (1..6) → vào home N, nhảy từng bậc 1..N
+    if (horse.pathIndex === len - 1 && dice >= 1 && dice <= 6) {
+      const homeCells = [];
+      let ok = true;
+      for (let h = 1; h <= dice; h++) {
+        const cell = BD().homeCell(horse.colorId, h);
+        if (!cell || occupantAt(state, cell.gx, cell.gy, horse.id)) { ok = false; break; }
+        homeCells.push({ gx: cell.gx, gy: cell.gy });
+      }
+      if (ok) {
+        moves.push({
+          type: 'home', horseId: horse.id, horseSlot: horse.slotIndex,
+          toGx: homeCells[homeCells.length - 1].gx,
+          toGy: homeCells[homeCells.length - 1].gy,
+          homeIndex: dice, steps: homeCells.length,
+          cells: homeCells, kickId: null
+        });
+      }
+    }
+
+    return moves;
+  }
+
+  function legalMoves(state, dice) {
+    const pl = state.players[state.current];
+    const list = [];
+    horsesOf(state, pl.colorId).forEach((h) => {
+      movesForHorse(state, h, dice).forEach((m) => list.push(m));
+    });
+    return list;
+  }
+
+  function applyMove(state, move) {
+    const horse = state.horses.find((h) => h.id === move.horseId);
+    if (!horse) return state;
+
+    if (move.kickId != null) {
+      const victim = state.horses.find((h) => h.id === move.kickId);
+      if (victim) {
+        const slot = BD().penSlots(victim.colorId)[victim.slotIndex];
+        victim.zone = 'pen'; victim.pathIndex = -1; victim.homeIndex = 0;
+        victim.gx = slot.gx; victim.gy = slot.gy;
+      }
+    }
+
+    if (move.type === 'kick_rear') {
+      horse.zone = 'track';
+      horse.pathIndex = move.pathIndex;
+      horse.gx = move.toGx; horse.gy = move.toGy;
+    } else if (move.type === 'exit') {
+      horse.zone = 'track'; horse.pathIndex = 0; horse.homeIndex = 0;
+      horse.gx = move.toGx; horse.gy = move.toGy; state.extraTurn = true;
+    } else if (move.type === 'move' || move.type === 'kick' || move.type === 'fly' || move.type === 'fly_kick') {
+      horse.zone = 'track'; horse.pathIndex = move.pathIndex;
+      horse.gx = move.toGx; horse.gy = move.toGy;
+    } else if (move.type === 'home') {
+      horse.zone = 'home'; horse.pathIndex = -1;
+      horse.homeIndex = move.homeIndex;
+      horse.gx = move.toGx; horse.gy = move.toGy;
+    }
+
+    if (state.dice === 6) state.extraTurn = true;
+    checkWin(state, horse.colorId);
+    return state;
+  }
+
+  function checkWin(state, colorId) {
+    const hs = horsesOf(state, colorId);
+    const idx = new Set(hs.filter((h) => h.zone === 'home' && h.homeIndex >= 3 && h.homeIndex <= 6).map((h) => h.homeIndex));
+    if (idx.has(6) && idx.has(5) && idx.has(4) && idx.has(3)) {
+      state.winner = colorId; state.phase = 'win';
+    }
+  }
+
+  function nextPlayer(state) {
+    if (state.winner != null) return state;
+    if (state.extraTurn) { state.extraTurn = false; state.phase = 'turn'; state.dice = 0; return state; }
+    state.current = (state.current + 1) % state.players.length;
+    state.phase = 'turn'; state.dice = 0;
+    return state;
+  }
+
+  global.Rules = { createGameState, horsesOf, legalMoves, movesForHorse, applyMove, nextPlayer };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script src="actions.js"></script>
+<script src="gamelog.js"></script>
+<script src="advanced-skills.js"></script>
+<script src="advanced-rules.js"></script>
+<script src="advanced-bot.js"></script>
+<script src="advanced-fx.js"></script>
+<script src="engine.js"></script>
+<script src="bot.js"></script>
+<script>
+(function () {
+  function showErr(msg) {
+    var el = document.getElementById("errBox");
+    el.style.display = "block";
+    el.textContent = String(msg);
+  }
+  window.onerror = function (m, s, l) { showErr(m + " @" + l); };
+  if (!window.BoardData || !window.Rules || !window.Engine || !window.Bot || !window.Actions) {
+    showErr("load fail"); return;
+  }
+
+  var params = new URLSearchParams(location.search);
+  var BOT_DELAY = {
+    beforeRoll: params.get("botdelay") === "0" ? 0 : 700,
+    beforeMove: params.get("botdelay") === "0" ? 0 : 500
+  };
+  var MINI_DICE_TIMING = { shake: Math.round(2500 * 2/3), hold: Math.round(6800 * 2/3) };
+  var MINI_DICE_VOLUME = 0.6;
+  var DEBUG = params.get("debug") === "1";
+
+  var boardFrame = document.getElementById("boardFrame");
+  var popupRoll = document.getElementById("popupRoll");
+  var popupAction = document.getElementById("popupAction");
+  var actionPanel = document.getElementById("actionPanel");
+  var btnRoll = document.getElementById("btnRoll");
+  var btnAuto = document.getElementById("btnAuto");
+  var slideLayer = document.getElementById("slideLayer");
+  var slideFrame = document.getElementById("slideFrame");
+  var miniDice = document.getElementById("miniDice");
+  var miniDiceFrame = document.getElementById("miniDiceFrame");
+  var turnBadge = document.getElementById("turnBadge");
+  var diceBadge = document.getElementById("diceBadge");
+  var hud = document.getElementById("hud");
+  var setup = document.getElementById("setup");
+  var winEl = document.getElementById("win");
+
+  var sfxShake = new Audio("a3a.mp3"); sfxShake.preload = "auto";
+  var sfxOpen = new Audio("a3b.mp3"); sfxOpen.preload = "auto";
+  function playSfx(a, vol) {
+    try {
+      a.pause(); a.currentTime = 0;
+      a.volume = (vol != null) ? vol : 1;
+      var p = a.play(); if (p && p.catch) p.catch(function(){});
+    } catch (e) {}
+  }
+
+  var engine = null;
+  var busy = false;
+  var actionMinimized = false;
+  var filteredMoves = [];
+  var humanPickResolve = null;
+  var loopRunning = false;
+  var phase = "idle";
+  var modeHasBot = false;
+  var autoPlay = false;
+
+  function boardAPI() {
+    try { return boardFrame.contentWindow && boardFrame.contentWindow.BoardAPI; } catch (e) { return null; }
+  }
+  function colorCss(cid) { return BoardData.COLORS[cid].css; }
+  function wait(ms) { return new Promise(function(r){ setTimeout(r, ms); }); }
+
+  function isLocalHuman(seat) {
+    return engine && engine.isLocalHuman(seat);
+  }
+
+  function setGameModeForPhase() {
+    var api = boardAPI();
+    if (!api) return;
+    // rảnh (idle + chờ lắc) → free drag; đang chơi → gameMode
+    var playing = (phase === "anim" || phase === "pick-horse" || phase === "reveal" || phase === "pick-action" || busy);
+    api.enableGameMode(playing);
+  }
+
+  function styleRollBtn(seat) {
+    var info = engine.seatInfo(seat);
+    var hex = colorCss(info.colorId);
+    btnRoll.style.backgroundColor = hex;
+    btnRoll.style.backgroundImage = "linear-gradient(180deg,rgba(255,255,255,.28),rgba(0,0,0,.12))";
+    var darkText = (info.colorId === 0 || info.colorId === 1);
+    btnRoll.style.color = darkText ? "#111" : "#fff";
+    btnRoll.style.boxShadow = "0 12px 36px " + hex + "cc,0 0 0 4px rgba(255,255,255,.25), inset 0 1px 0 rgba(255,255,255,.4)";
+  }
+
+  function refreshHud() {
+    if (!engine) return;
+    var seat = engine.currentSeat();
+    var info = engine.seatInfo(seat);
+    var name = BoardData.COLORS[info.colorId].name;
+    if (info.controller === "bot") name += " · MÁY";
+    turnBadge.textContent = name;
+    turnBadge.style.background = colorCss(info.colorId);
+    turnBadge.style.color = (info.colorId === 0 || info.colorId === 1) ? "#111" : "#fff";
+    diceBadge.textContent = engine.state.dice ? String(engine.state.dice) : "·";
+    styleRollBtn(seat);
+    // auto toggle chỉ hiện khi chế độ có bot
+    btnAuto.style.display = modeHasBot ? "inline-block" : "none";
+    btnAuto.textContent = autoPlay ? "TỰ ĐỘNG: BẬT" : "TỰ ĐỘNG: TẮT";
+    btnAuto.classList.toggle("on", autoPlay);
+    btnAuto.disabled = busy || phase === "anim";
+  }
+
+  function showRoll(v) {
+    popupRoll.classList.toggle("show", !!v);
+    if (v) { phase = "idle"; setGameModeForPhase(); }
+  }
+  function hideMiniDice() {
+    miniDice.classList.remove("show");
+    miniDiceFrame.src = "about:blank";
+  }
+  function showAction(v) {
+    if (!v) {
+      popupAction.classList.remove("show", "mini");
+      actionMinimized = false;
+      return;
+    }
+    hideMiniDice();
+    popupAction.classList.add("show");
+    if (actionMinimized) popupAction.classList.add("mini");
+    else popupAction.classList.remove("mini");
+  }
+
+  async function presentDice(dice, seat) {
+    phase = "reveal";
+    setGameModeForPhase();
+    if (isLocalHuman(seat)) {
+      hideMiniDice();
+      playSfx(sfxShake, 1);
+      slideLayer.classList.add("show");
+      slideFrame.src = "Lac_hop.html";
+      await wait(2500);
+      playSfx(sfxOpen, 1);
+      slideFrame.src = "Mat_dice.html?face=" + dice + "&dur=6500";
+      await wait(6800);
+      slideLayer.classList.remove("show");
+      slideFrame.src = "about:blank";
+    } else {
+      showAction(false);
+      showRoll(false);
+      slideLayer.classList.remove("show");
+      var hex = colorCss(engine.seatInfo(seat).colorId);
+      miniDice.style.setProperty("--seat-color", hex);
+      playSfx(sfxShake, MINI_DICE_VOLUME);
+      miniDice.classList.add("show");
+      miniDiceFrame.src = "Lac_hop.html";
+      await wait(MINI_DICE_TIMING.shake);
+      playSfx(sfxOpen, MINI_DICE_VOLUME);
+      miniDiceFrame.src = "Mat_dice.html?face=" + dice + "&dur=6500";
+      await wait(MINI_DICE_TIMING.hold);
+      hideMiniDice();
+    }
+  }
+
+  function syncBoard() {
+    var api = boardAPI();
+    if (!api) return;
+    api.syncState({
+      horses: engine.state.horses.map(function(h) {
+        return { id: h.id, gx: h.gx, gy: h.gy, colorId: h.colorId, slotIndex: h.slotIndex, zone: h.zone };
+      })
+    });
+    setGameModeForPhase();
+  }
+
+  var TYPE_LABEL = {
+    exit: "XUẤT QUÂN", move: "DI CHUYỂN", kick: "ĐÁ QUÂN",
+    kick_rear: "ĐÁ HẬU", home: "LÊN CHUỒNG", fly: "BAY", fly_kick: "ĐÁ BAY"
+  };
+
+  function groupTypes(moves) {
+    var map = {};
+    moves.forEach(function(m) {
+      if (!map[m.type]) map[m.type] = [];
+      map[m.type].push(m);
+    });
+    return map;
+  }
+
+  function uniqueHorseIds(moves) {
+    var ids = [];
+    moves.forEach(function(m) {
+      if (ids.indexOf(m.horseId) < 0) ids.push(m.horseId);
+    });
+    return ids;
+  }
+
+  function behindCamForMove(move) {
+    var api = boardAPI();
+    if (!api || !api.cameraBehindMove) return;
+    var h = engine.state.horses.find(function(x){ return x.id === move.horseId; });
+    api.cameraBehindMove(h ? h.gx : move.toGx, h ? h.gy : move.toGy, move.toGx, move.toGy);
+  }
+
+  function humanPickMove(moves) {
+    return new Promise(function(resolve) {
+      humanPickResolve = resolve;
+      phase = "pick-action";
+      setGameModeForPhase();
+      var groups = groupTypes(moves);
+      var keys = Object.keys(groups);
+      if (keys.length === 1 && uniqueHorseIds(groups[keys[0]]).length === 1) {
+        var m = groups[keys[0]][0];
+        humanPickResolve = null;
+        resolve({ move: m, auto: true });
+        return;
+      }
+      if (keys.length === 1) {
+        onPickType(keys[0], groups[keys[0]]);
+        return;
+      }
+      actionMinimized = false;
+      actionPanel.innerHTML = "";
+      keys.forEach(function(t) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "popup-btn " + t;
+        btn.textContent = TYPE_LABEL[t] || t;
+        function go(e) { e.preventDefault(); onPickType(t, groups[t]); }
+        btn.addEventListener("click", go);
+        btn.addEventListener("touchend", go, { passive: false });
+        actionPanel.appendChild(btn);
+      });
+      var mini = document.createElement("button");
+      mini.type = "button";
+      mini.id = "btnMinimize";
+      mini.className = "popup-btn mini-btn";
+      mini.textContent = "THU NHỎ";
+      function doMini(e) {
+        e.preventDefault();
+        actionMinimized = true;
+        popupAction.classList.add("mini");
+      }
+      mini.addEventListener("click", doMini);
+      mini.addEventListener("touchend", doMini, { passive: false });
+      actionPanel.appendChild(mini);
+      showAction(true);
+    });
+  }
+
+  function onPickType(type, movesOfType) {
+    showAction(false);
+    filteredMoves = movesOfType;
+    var api = boardAPI();
+    var ids = uniqueHorseIds(movesOfType);
+    if (ids.length === 1) {
+      finishHumanPick(movesOfType[0], false);
+      return;
+    }
+    phase = "pick-horse";
+    setGameModeForPhase();
+    if (api) {
+      if (api.cameraOverview) api.cameraOverview();
+      api.setHorseBlink(ids);
+      api.showTargetMarkers(movesOfType.map(function(m){ return { gx: m.toGx, gy: m.toGy }; }));
+    }
+  }
+
+  function finishHumanPick(move, auto) {
+    phase = "idle";
+    setGameModeForPhase();
+    var api = boardAPI();
+    if (api) {
+      if (api.clearBlink) api.clearBlink();
+      if (api.showTargetMarkers) api.showTargetMarkers([]);
+    }
+    if (humanPickResolve) {
+      var r = humanPickResolve;
+      humanPickResolve = null;
+      r({ move: move, auto: !!auto });
+    }
+  }
+
+  function onHorsePicked(logicId) {
+    if (phase !== "pick-horse" || busy) return;
+    var moves = filteredMoves.filter(function(m){ return m.horseId === logicId; });
+    if (!moves.length) return;
+    finishHumanPick(moves[0], false);
+  }
+
+  async function animateMove(move) {
+    var api = boardAPI();
+    behindCamForMove(move);
+    var isKick = (move.type === "kick" || move.type === "kick_rear" || move.type === "fly_kick");
+    var isFly = (move.type === "fly" || move.type === "fly_kick");
+    // exit chỉ 1 ô
+    var cells = move.cells || [];
+    if (move.type === "exit" && cells.length > 1) cells = cells.slice(0, 1);
+    if (api && cells.length) {
+      if (isFly && api.playFly) await api.playFly(move.horseId, cells);
+      else await api.playSteps(move.horseId, cells, isKick ? { kickLast: true } : {});
+    }
+  }
+
+  async function afterMoveAnimations(move, res) {
+    var api = boardAPI();
+    if (res.kick != null && api) {
+      var v = engine.state.horses.find(function(h){ return h.id === res.kick; });
+      if (v) {
+        var dir = null;
+        if (move.cells && move.cells.length >= 2) {
+          var a = move.cells[move.cells.length - 2];
+          var b = move.cells[move.cells.length - 1];
+          dir = { x: b.gx - a.gx, z: -(b.gy - a.gy) };
+        }
+        await api.playKickReturn(v.id, v.gx, v.gy, {
+          dirWorld: dir,
+          reverse: move.type === "kick_rear"
+        });
+      }
+    }
+    syncBoard();
+    if (api && api.cameraDefault) api.cameraDefault();
+  }
+
+  function humanRoll() {
+    return new Promise(function(resolve) {
+      phase = "idle";
+      setGameModeForPhase();
+      function onBtn(e) {
+        e.preventDefault();
+        btnRoll.removeEventListener("click", onBtn);
+        btnRoll.removeEventListener("touchend", onBtn);
+        resolve();
+      }
+      btnRoll.addEventListener("click", onBtn);
+      btnRoll.addEventListener("touchend", onBtn, { passive: false });
+    });
+  }
+
+  async function runTurnLoop() {
+    if (loopRunning) return;
+    loopRunning = true;
+    while (engine && engine.state.winner == null) {
+      try {
+        var seat = engine.currentSeat();
+        engine.beginTurn();
+        refreshHud();
+        phase = "idle";
+        setGameModeForPhase();
+
+        if (isLocalHuman(seat)) {
+          showRoll(true);
+          await humanRoll();
+          showRoll(false);
+        } else {
+          showRoll(false);
+          showAction(false);
+          await wait(BOT_DELAY.beforeRoll);
+        }
+
+        var r = engine.roll();
+        refreshHud();
+        await presentDice(r.dice, seat);
+
+        if (r.noMove) {
+          await wait(400);
+          engine.resolveNoMove();
+          continue;
+        }
+
+        var move, by, meta = {};
+        var ActiveBot = (engine.ruleMode === "advanced" && window.AdvancedBot) ? AdvancedBot : Bot;
+        if (isLocalHuman(seat)) {
+          var picked = await humanPickMove(r.moves);
+          move = picked.move;
+          by = "human";
+          meta.auto = !!picked.auto;
+        } else {
+          await wait(BOT_DELAY.beforeMove);
+          move = ActiveBot.chooseMove(engine.state, r.moves);
+          by = "bot";
+          meta.rule = ActiveBot.classify(move, engine.state);
+          meta.auto = r.moves.length === 1;
+        }
+
+        // Advanced: chọn skill khi xuất quân
+        if (engine.ruleMode === "advanced" && move && move.type === "exit") {
+          var h = engine.state.horses.find(function(x){ return x.id === move.horseId; });
+          if (h && !h.skillId) {
+            if (isLocalHuman(seat)) {
+              var sid = await openSkillSelect(move.horseId);
+              engine.assignSkill(move.horseId, sid);
+            } else {
+              engine.autoAssignSkillIfNeeded(move);
+            }
+          }
+        }
+
+        // Một lần chỉ 1 nước — exit dừng sau START, lượt thưởng chờ lắc lại
+        engine.choose(move, by, meta);
+        phase = "anim";
+        busy = true;
+        setGameModeForPhase();
+        refreshHud();
+
+        var watch = null;
+        var animDone = false;
+        try {
+          watch = setTimeout(function() {
+            if (!animDone) {
+              try {
+                engine.log.push("ERROR", engine.currentSeat(),
+                  engine.seatInfo(engine.currentSeat()).colorId,
+                  engine.seatInfo(engine.currentSeat()).controller,
+                  { where: "watchdog" });
+              } catch (e) {}
+            }
+          }, 30000);
+          await animateMove(move);
+        } catch (e) { showErr(e); }
+
+        var res = engine.apply(move);
+        try {
+          if (window.AdvancedFX && engine.ruleMode === "advanced") {
+            AdvancedFX.play(move, res, window.__boardAPI || {});
+          }
+          await afterMoveAnimations(move, res);
+        } catch (e) { showErr(e); syncBoard(); }
+
+        animDone = true;
+        if (watch) clearTimeout(watch);
+        busy = false;
+        phase = "idle";
+        setGameModeForPhase();
+        refreshHud();
+
+        if (res.winner != null) {
+          document.getElementById("winText").textContent = BoardData.COLORS[res.winner].name;
+          winEl.classList.add("show");
+          break;
+        }
+        engine.endTurnTracked();
+      } catch (e) {
+        showErr(e);
+        busy = false;
+        phase = "idle";
+        setGameModeForPhase();
+        try {
+          if (engine && engine.state.winner == null) engine.endTurnTracked();
+        } catch (e2) {}
+        await wait(500);
+      }
+    }
+    loopRunning = false;
+  }
+
+  window.addEventListener("message", function(ev) {
+    var d = ev.data;
+    if (!d || typeof d !== "object") return;
+    if (d.type === "board-ready" && engine) syncBoard();
+    if (d.type === "board-horse" && d.logicId != null) onHorsePicked(d.logicId);
+  });
+
+  function bindTap(el, fn) {
+    if (!el) return;
+    var locked = false;
+    function fire(e) {
+      if (locked) return;
+      locked = true;
+      try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
+      try { fn(e); } catch (err) { showErr(err); }
+      setTimeout(function(){ locked = false; }, 400);
+    }
+    el.addEventListener("click", fire, false);
+    el.addEventListener("touchend", fire, { passive: false });
+  }
+
+  function toggleAuto() {
+    if (!engine || !modeHasBot || busy || phase === "anim") return;
+    autoPlay = !autoPlay;
+    var hs = engine.humanSeat;
+    if (autoPlay) {
+      engine.seats[hs].controller = "bot";
+    } else {
+      engine.seats[hs].controller = "human-local";
+    }
+    refreshHud();
+  }
+  bindTap(btnAuto, toggleAuto);
+
+  var selectedRuleMode = (function(){
+    try { return localStorage.getItem("canguav3d.ruleMode") || "classic"; } catch(e){ return "classic"; }
+  })();
+
+  function setRuleMode(mode) {
+    selectedRuleMode = mode === "advanced" ? "advanced" : "classic";
+    try { localStorage.setItem("canguav3d.ruleMode", selectedRuleMode); } catch(e){}
+    var bc = document.getElementById("btnClassic");
+    var ba = document.getElementById("btnAdvanced");
+    if (bc && ba) {
+      bc.classList.toggle("mode-active", selectedRuleMode === "classic");
+      ba.classList.toggle("mode-active", selectedRuleMode === "advanced");
+    }
+  }
+
+  function startGame(opts) {
+    if (engine) return;
+    opts = opts || {};
+    var n = opts.numPlayers || 2;
+    var humanSeat = opts.humanSeat != null ? opts.humanSeat : 0;
+    var ruleMode = opts.ruleMode || selectedRuleMode || "classic";
+    modeHasBot = !opts.allHuman;
+    autoPlay = false;
+    var seats = [];
+    for (var i = 0; i < n; i++) {
+      if (opts.allHuman) seats.push({ controller: "human-local" });
+      else seats.push({ controller: (i === humanSeat) ? "human-local" : "bot" });
+    }
+    engine = Engine.create({ numPlayers: n, seats: seats, humanSeat: humanSeat, ruleMode: ruleMode });
+    engine.beginGame();
+    var mb = document.getElementById("modeBadge");
+    if (!mb) {
+      mb = document.createElement("span");
+      mb.id = "modeBadge";
+      mb.className = "badge";
+      var row = document.getElementById("hudRow");
+      if (row) row.appendChild(mb);
+    }
+    mb.textContent = ruleMode === "advanced" ? "NÂNG CAO" : "TRUYỀN THỐNG";
+    mb.style.background = ruleMode === "advanced" ? "#7c2d12" : "#333";
+    if (DEBUG) window.__gameLog = engine.log;
+
+    setup.style.display = "none";
+    hud.style.display = "flex";
+    boardFrame.style.display = "block";
+    boardFrame.src = "board.html";
+    phase = "idle";
+    refreshHud();
+
+    var tries = 0;
+    (function trySync() {
+      tries++;
+      if (boardAPI()) { syncBoard(); runTurnLoop(); return; }
+      if (tries < 50) setTimeout(trySync, 200);
+      else runTurnLoop();
+    })();
+  }
+
+  bindTap(document.getElementById("btn2"), function(){ startGame({ numPlayers: 2, allHuman: true }); });
+  bindTap(document.getElementById("btn3"), function(){ startGame({ numPlayers: 3, allHuman: true }); });
+  bindTap(document.getElementById("btn4"), function(){ startGame({ numPlayers: 4, allHuman: true }); });
+  bindTap(document.getElementById("btnBot1"), function(){ startGame({ numPlayers: 2, humanSeat: 0 }); });
+  bindTap(document.getElementById("btnBot2"), function(){ startGame({ numPlayers: 3, humanSeat: 0 }); });
+  bindTap(document.getElementById("btnBot3"), function(){ startGame({ numPlayers: 4, humanSeat: 0 }); });
+  bindTap(document.getElementById("btnDownloadLog"), function() {
+    if (engine && engine.log) engine.log.download();
+  });
+  bindTap(document.getElementById("btnClassic"), function(){ setRuleMode("classic"); });
+  bindTap(document.getElementById("btnAdvanced"), function(){ setRuleMode("advanced"); });
+  setRuleMode(selectedRuleMode);
+
+  /* ===== Skill select Bottom Sheet (advanced) ===== */
+  var skillSelectResolve = null;
+  var selectedSkillId = null;
+
+  function openSkillSelect(horseId) {
+    return new Promise(function(resolve) {
+      if (!window.AdvancedSkills) { resolve(1); return; }
+      skillSelectResolve = resolve;
+      selectedSkillId = null;
+      var sheet = document.getElementById("skillSheet");
+      var systemsEl = document.getElementById("skillSystems");
+      var cardsEl = document.getElementById("skillCards");
+      var detailEl = document.getElementById("skillDetail");
+      var btn = document.getElementById("btnConfirmSkill");
+      btn.disabled = true;
+      detailEl.textContent = "";
+      systemsEl.innerHTML = "";
+      cardsEl.innerHTML = "";
+      var systems = AdvancedSkills.SYSTEMS;
+      var currentSys = "breakthrough";
+      Object.keys(systems).forEach(function(key) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.textContent = systems[key].name;
+        b.dataset.sys = key;
+        if (key === currentSys) b.classList.add("active");
+        b.addEventListener("click", function() {
+          currentSys = key;
+          Array.prototype.forEach.call(systemsEl.querySelectorAll("button"), function(x){ x.classList.toggle("active", x.dataset.sys === key); });
+          renderCards();
+        });
+        systemsEl.appendChild(b);
+      });
+      function renderCards() {
+        cardsEl.innerHTML = "";
+        var list = AdvancedSkills.listBySystem(currentSys);
+        list.forEach(function(sk) {
+          var ok = AdvancedSkills.canSelectSkill(engine.state, engine.state.players[engine.state.current].colorId, sk.id);
+          var card = document.createElement("div");
+          card.className = "skill-card" + (ok ? "" : " disabled");
+          card.style.opacity = ok ? "1" : "0.4";
+          card.innerHTML = '<div style="font-size:11px;color:'+sk.color+'">'+sk.systemName+'</div>' +
+            '<div class="sk-name">'+sk.name+'</div>' +
+            '<div class="sk-short">'+sk.short+'</div>';
+          if (ok) {
+            card.addEventListener("click", function() {
+              selectedSkillId = sk.id;
+              Array.prototype.forEach.call(cardsEl.querySelectorAll(".skill-card"), function(x){ x.classList.remove("selected"); });
+              card.classList.add("selected");
+              detailEl.innerHTML = "<b>"+sk.name+"</b>: "+sk.desc+"<br><span style='opacity:.8'>Điểm yếu: "+sk.weakness+"</span>";
+              btn.disabled = false;
+            });
+          }
+          cardsEl.appendChild(card);
+        });
+      }
+      renderCards();
+      sheet.style.display = "flex";
+      btn.onclick = function() {
+        if (selectedSkillId == null) return;
+        sheet.style.display = "none";
+        var r = skillSelectResolve;
+        skillSelectResolve = null;
+        if (r) r(selectedSkillId);
+      };
+    });
+  }
+
+  // Hook: before applying exit in advanced mode for human, open skill sheet
+  var _origChooseAndApply = null;
+})();
+</script>
+</body>
+</html>
