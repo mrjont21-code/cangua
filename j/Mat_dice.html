@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>Xúc Xắc</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#12080a}
+canvas{display:block;width:100%;height:100%}
+#label{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);
+ padding:8px 18px;border:1px solid rgba(212,175,55,.5);border-radius:8px;
+ color:#f4df9a;background:rgba(0,0,0,.55);font:600 15px Arial;letter-spacing:1px;
+ pointer-events:none;opacity:0;transition:opacity .4s}
+</style>
+</head>
+<body>
+<div id="label">MẶT</div>
+<script type="importmap">
+{"imports":{
+"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+"three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { Dice6D } from './dice6d.js';
+
+const params = new URLSearchParams(location.search);
+const face = Math.min(6, Math.max(1, parseInt(params.get('face') || '6', 10) || 6));
+const DURATION = parseInt(params.get('dur') || '6500', 10) || 6500;
+
+const label = document.getElementById('label');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x12080a);
+scene.fog = new THREE.Fog(0x12080a, 11, 20);
+
+const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(3.35, 5.55, 8.85);
+camera.lookAt(0, 1.0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xffead0, 0x090405, 2.0));
+const key = new THREE.DirectionalLight(0xffe3b0, 3.2);
+key.position.set(4, 8, 5); scene.add(key);
+const fill = new THREE.DirectionalLight(0x7b86ff, 1.1);
+fill.position.set(-5, 4, 2); scene.add(fill);
+const rim = new THREE.PointLight(0xffa33c, 2.0, 12);
+rim.position.set(0, 3, -3); scene.add(rim);
+
+const floor = new THREE.Mesh(
+  new THREE.CylinderGeometry(4.7, 4.9, 0.18, 96),
+  new THREE.MeshStandardMaterial({ color: 0x241014, roughness: 0.82, metalness: 0.05 })
+);
+floor.position.y = -0.09; scene.add(floor);
+
+const plinth = new THREE.Mesh(
+  new THREE.CylinderGeometry(2.55, 2.72, 0.34, 96),
+  new THREE.MeshStandardMaterial({ color: 0x080808, roughness: 0.28, metalness: 0.58 })
+);
+plinth.position.y = 0.17; scene.add(plinth);
+
+for (const y of [0.29, 0.42]) {
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(2.42, 0.055, 16, 96),
+    new THREE.MeshStandardMaterial({ color: 0xcaa83d, roughness: 0.22, metalness: 0.9 })
+  );
+  ring.rotation.x = Math.PI / 2; ring.position.y = y; scene.add(ring);
+}
+
+const dice = new Dice6D({
+  size: 1.22, radius: 0.22, segments: 18, dotScale: 2,
+  anisotropy: renderer.capabilities.getMaxAnisotropy()
+});
+dice.group.position.set(0, 1.12, 0);
+scene.add(dice.group);
+
+// Cốc lắc
+const cup = new THREE.Group();
+cup.position.set(0, 0.60, 0);
+scene.add(cup);
+const cupMat = new THREE.MeshStandardMaterial({
+  color: 0x080808, roughness: 0.22, metalness: 0.55, side: THREE.DoubleSide
+});
+const shell = new THREE.Mesh(new THREE.CylinderGeometry(1.62, 1.82, 2.05, 96, 1, false), cupMat);
+shell.position.y = 1.025; cup.add(shell);
+const dome = new THREE.Mesh(new THREE.SphereGeometry(1.62, 96, 48, 0, Math.PI * 2, 0, Math.PI / 2), cupMat);
+dome.position.y = 2.04; cup.add(dome);
+const innerTop = new THREE.Mesh(
+  new THREE.CylinderGeometry(1.52, 1.52, 0.10, 96),
+  new THREE.MeshStandardMaterial({ color: 0x020202, roughness: 0.8, metalness: 0.05 })
+);
+innerTop.position.y = 2.00; cup.add(innerTop);
+for (const y of [0.13, 2.02]) {
+  const r = new THREE.Mesh(
+    new THREE.TorusGeometry(y < 1 ? 1.82 : 1.58, 0.075, 18, 96),
+    new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.2, metalness: 0.9 })
+  );
+  r.rotation.x = Math.PI / 2; r.position.y = y; cup.add(r);
+}
+
+const start = performance.now();
+const easeOutQuart = (t) => 1 - Math.pow(1 - t, 4);
+
+// Mặt đã random sẵn từ index → spinTo đúng mặt (quỹ đạo khác mỗi lần)
+dice.spinTo(face, {
+  duration: DURATION,
+  wobble: 0.06,
+  onDone: (f) => {
+    label.textContent = 'MẶT ' + f;
+    label.style.opacity = 1;
+    try { parent.postMessage({ type: 'dice-done', face: f }, '*'); } catch (e) {}
+  }
+});
+
+function cupAnim(now) {
+  const t = Math.min((now - start) / DURATION, 1);
+  cup.position.y = 0.60 + 2.72 * easeOutQuart(t);
+  if (t < 1) requestAnimationFrame(cupAnim);
+}
+requestAnimationFrame(cupAnim);
+
+function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(animate);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

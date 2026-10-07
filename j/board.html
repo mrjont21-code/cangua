@@ -1,0 +1,1475 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Cá Ngựa 3D — 4 chuồng xuất quân</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080704}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+#err{position:fixed;inset:0;display:none;place-items:center;color:#ffd76a;background:#080704;font:16px sans-serif;padding:30px;text-align:center}
+</style>
+</head>
+<body>
+<div id="err"></div>
+<script src="three.min.js"></script>
+<script src="OrbitControls.js"></script>
+<!-- Font/TextGeometry chỉ có trên CDN; không ghi đè THREE local -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FontLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/TextGeometry.js"></script>
+<script>
+if(!window.THREE){document.getElementById('err').style.display='grid';document.getElementById('err').textContent='Không tải được Three.js (cần three.min.js).';throw Error('THREE');}
+if(!THREE.OrbitControls){document.getElementById('err').style.display='grid';document.getElementById('err').textContent='Không tải được OrbitControls.';throw Error('OrbitControls');}
+window.onerror = function(msg, src, line) {
+  var el = document.getElementById('err');
+  el.style.display = 'grid';
+  el.textContent = String(msg) + ' @' + line;
+  return false;
+};
+
+/* ═══════════════════════════════════════════════════════════════
+   HORSE3D — adapted from horse3d.js (global THREE, no modules)
+   ═══════════════════════════════════════════════════════════════ */
+const TAU = Math.PI * 2;
+const DEG = Math.PI / 180;
+const HORSE_STANDARD = Object.freeze({
+  BASE_DIAMETER: 8, PEDESTAL_TOP: 2.6, UPPER_SCALE: 1.5, ACCENT: 0xf59e0b
+});
+const HEADING = Object.freeze({ EAST: 0, NORTH: 90, WEST: 180, SOUTH: -90 });
+const EASE = {
+  linear: t => t,
+  in: t => t * t,
+  out: t => 1 - Math.pow(1 - t, 3),
+  inOut: t => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2)
+};
+let SHARED = null;
+function createHorseShape() {
+  const s = new THREE.Shape();
+  s.moveTo(-0.9, -0.2);
+  s.bezierCurveTo(-1.3, 1.5, -1.4, 3.2, -0.9, 4.6);
+  s.bezierCurveTo(-1.0, 5.4, -0.8, 6.2, -0.3, 6.6);
+  s.lineTo(-0.1, 6.7);
+  s.bezierCurveTo(0.0, 5.9, 0.3, 5.5, 0.7, 5.3);
+  s.bezierCurveTo(1.3, 5.0, 2.3, 4.3, 2.7, 3.6);
+  s.bezierCurveTo(2.8, 3.1, 2.3, 2.8, 1.8, 2.9);
+  s.bezierCurveTo(1.4, 2.7, 1.0, 2.3, 0.8, 1.7);
+  s.bezierCurveTo(0.6, 0.9, 0.7, 0.3, 0.8, -0.2);
+  s.closePath();
+  return s;
+}
+function getShared() {
+  if (SHARED) return SHARED;
+  const horseGeo = new THREE.ExtrudeGeometry(createHorseShape(), {
+    steps: 2, depth: 1.4, bevelEnabled: true,
+    bevelThickness: 0.35, bevelSize: 0.3, bevelOffset: 0, bevelSegments: 8
+  });
+  horseGeo.center();
+  horseGeo.computeBoundingBox();
+  SHARED = {
+    horseGeo,
+    bot: new THREE.CylinderGeometry(3.6, 4.0, 0.8, 48),
+    mid: new THREE.CylinderGeometry(3.0, 3.4, 0.6, 48),
+    top: new THREE.CylinderGeometry(2.4, 3.0, 1.2, 48),
+    belt: new THREE.TorusGeometry(3.2, 0.15, 16, 48),
+    eye: {
+      socket: new THREE.SphereGeometry(0.43, 40, 28),
+      ball: new THREE.SphereGeometry(0.34, 48, 32),
+      pupil: new THREE.SphereGeometry(0.145, 32, 24),
+      iris: new THREE.RingGeometry(0.17, 0.265, 48),
+      glint1: new THREE.SphereGeometry(0.072, 20, 16),
+      glint2: new THREE.SphereGeometry(0.032, 16, 12)
+    },
+    eyeMat: {
+      ball: new THREE.MeshPhysicalMaterial({ color: 0x5b3518, roughness: 0.12, metalness: 0.02, clearcoat: 1, clearcoatRoughness: 0.04 }),
+      pupil: new THREE.MeshPhysicalMaterial({ color: 0x050505, roughness: 0.06, clearcoat: 1, clearcoatRoughness: 0.02 }),
+      iris: new THREE.MeshBasicMaterial({ color: 0x8a4b20, side: THREE.DoubleSide }),
+      glint: new THREE.MeshBasicMaterial({ color: 0xffffff })
+    },
+    dims: null
+  };
+  return SHARED;
+}
+function makeMaterial(color, type) {
+  switch (type) {
+    case 'plastic':
+      return new THREE.MeshPhysicalMaterial({ color, roughness: 0.15, metalness: 0.05, clearcoat: 1, clearcoatRoughness: 0.1, reflectivity: 0.9 });
+    case 'wood':
+      return new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0 });
+    case 'metal':
+      return new THREE.MeshStandardMaterial({ color, roughness: 0.15, metalness: 0.9 });
+    case 'gold':
+      return new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.15, metalness: 0.9 });
+    case 'glass':
+      return new THREE.MeshPhysicalMaterial({ color, roughness: 0.1, metalness: 0.1, transmission: 0.6, opacity: 0.9, transparent: true, ior: 1.5, thickness: 2 });
+    default:
+      return new THREE.MeshStandardMaterial({ color });
+  }
+}
+function buildEye(sh, socketMat, side) {
+  const g = new THREE.Group();
+  g.position.set(0.78, 0.98, 0.56 * side);
+  g.rotation.y = side > 0 ? -0.08 : Math.PI + 0.08;
+  g.scale.setScalar(1.65);
+  const sx = side;
+  const add = (geo, mat, sc, pos) => {
+    const m = new THREE.Mesh(geo, mat);
+    if (sc) m.scale.set(...sc);
+    m.position.set(...pos);
+    g.add(m);
+    return m;
+  };
+  add(sh.eye.socket, socketMat, [1, 0.82, 0.34], [0, 0, 0.10]);
+  add(sh.eye.ball, sh.eyeMat.ball, [1, 0.92, 0.55], [0, 0, 0.16]);
+  add(sh.eye.pupil, sh.eyeMat.pupil, [1, 1.08, 0.45], [0.025 * sx, -0.005, 0.40]);
+  add(sh.eye.iris, sh.eyeMat.iris, [1, 0.92, 1], [0, 0, 0.39]);
+  add(sh.eye.glint1, sh.eyeMat.glint, null, [-0.09 * sx, 0.105, 0.56]);
+  add(sh.eye.glint2, sh.eyeMat.glint, null, [0.105 * sx, -0.015, 0.55]);
+  return g;
+}
+const newAcc = () => ({ x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, hd: 0, nz: 0, ny: 0 });
+const wrapPi = a => Math.atan2(Math.sin(a), Math.cos(a));
+const pt = p => (p ? { x: p.x ?? 0, y: p.y ?? 0, z: p.z ?? 0 } : null);
+
+class Horse3D {
+  constructor(o = {}) {
+    const sh = getShared();
+    this.color = o.color ?? 0xdc2626;
+    this.materialType = o.material ?? 'plastic';
+    this.accent = o.accent ?? HORSE_STANDARD.ACCENT;
+    this.size = 1;
+    this.state = { pos: new THREE.Vector3(), heading: 0 };
+    this._tracks = [];
+    this._ev = {};
+    this._acc = newAcc();
+    this._markers = null;
+    this.penId = o.penId ?? -1;
+    this.gridX = 0;
+    this.gridY = 0;
+
+    this.mat = makeMaterial(this.color, this.materialType);
+    this.socketMat = new THREE.MeshPhysicalMaterial({ roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.08 });
+    this.beltMat = new THREE.MeshStandardMaterial({ color: this.accent, metalness: 0.8, roughness: 0.2 });
+    this._bodyMeshes = [];
+    const shadows = o.shadows !== false;
+
+    const model = new THREE.Group();
+    model.name = 'HorseModel';
+    const body = (geo, y) => {
+      const m = new THREE.Mesh(geo, this.mat);
+      m.position.y = y;
+      m.castShadow = m.receiveShadow = shadows;
+      model.add(m);
+      this._bodyMeshes.push(m);
+    };
+    body(sh.bot, 0.4); body(sh.mid, 1.1); body(sh.top, 2.0);
+    const belt = new THREE.Mesh(sh.belt, this.beltMat);
+    belt.rotation.x = Math.PI / 2; belt.position.y = 0.8;
+    model.add(belt);
+
+    this.neck = new THREE.Group();
+    this.neck.name = 'Neck';
+    this.neck.position.y = HORSE_STANDARD.PEDESTAL_TOP;
+    model.add(this.neck);
+    const upper = new THREE.Group();
+    upper.scale.setScalar(HORSE_STANDARD.UPPER_SCALE);
+    upper.position.y = -sh.horseGeo.boundingBox.min.y * HORSE_STANDARD.UPPER_SCALE;
+    this.neck.add(upper);
+    const head = new THREE.Mesh(sh.horseGeo, this.mat);
+    head.position.x = 0.75;
+    head.castShadow = head.receiveShadow = shadows;
+    upper.add(head);
+    this._bodyMeshes.push(head);
+    head.add(buildEye(sh, this.socketMat, 1), buildEye(sh, this.socketMat, -1));
+
+    if (!sh.dims) {
+      const b = new THREE.Box3().setFromObject(model);
+      const height = b.max.y - b.min.y;
+      const cy = b.min.y + height / 2;
+      let r = 0;
+      for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) {
+        r = Math.max(r, Math.hypot(x, y - cy, z));
+      }
+      sh.dims = { height, centerY: cy, radius: r, baseDiameter: HORSE_STANDARD.BASE_DIAMETER };
+    }
+    this.dims = sh.dims;
+
+    this.root = new THREE.Group();
+    this.root.name = 'Horse3D';
+    this.root.userData.horse3d = this;
+    this.pivot = new THREE.Group();
+    this.pivot.name = 'Pivot';
+    this.pivot.position.y = this.dims.centerY;
+    this.root.add(this.pivot);
+    model.position.y = -this.dims.centerY;
+    this.pivot.add(model);
+    this.anchors = { base: new THREE.Object3D(), center: new THREE.Object3D() };
+    this.anchors.base.name = 'ANCHOR_BASE';
+    this.anchors.center.name = 'ANCHOR_CENTER';
+    this.root.add(this.anchors.base);
+    this.pivot.add(this.anchors.center);
+
+    this._syncColors();
+    this.configure({ size: o.size, heading: o.heading, position: o.position });
+  }
+  configure(o = {}) {
+    if (o.material) this.setMaterial(o.material);
+    if (o.color != null) this.setColor(o.color);
+    if (o.accent != null) this.setAccent(o.accent);
+    if (o.size != null) this.setSize(o.size);
+    if (o.heading != null) this.setHeading(o.heading);
+    if (o.position) this.setPosition(o.position);
+    return this;
+  }
+  _syncColors() {
+    const c = this.materialType === 'gold' ? 0xf59e0b : this.color;
+    this.mat.color.set(c);
+    this.socketMat.color.set(c);
+  }
+  setColor(hex) { this.color = hex; this._syncColors(); return this; }
+  setAccent(hex) { this.accent = hex; this.beltMat.color.set(hex); return this; }
+  setMaterial(type) {
+    if (type === this.materialType) return this;
+    this.materialType = type;
+    const old = this.mat;
+    this.mat = makeMaterial(this.color, type);
+    this._bodyMeshes.forEach(m => { m.material = this.mat; });
+    old.dispose();
+    this._syncColors();
+    return this;
+  }
+  setSize(s) { this.size = s; this.root.scale.setScalar(s); return this; }
+  setBaseDiameter(d) { return this.setSize(d / HORSE_STANDARD.BASE_DIAMETER); }
+  setVisible(v) { this.root.visible = v; return this; }
+  setPosition(x, y, z) {
+    if (typeof x === 'object') { y = x.y ?? 0; z = x.z ?? 0; x = x.x ?? 0; }
+    this.state.pos.set(x ?? 0, y ?? 0, z ?? 0);
+    this._apply(this._acc);
+    return this;
+  }
+  setHeading(deg) { this.state.heading = deg * DEG; this._apply(this._acc); return this; }
+  faceTo(x, z) {
+    if (typeof x === 'object') { z = x.z; x = x.x; }
+    const dx = x - this.state.pos.x, dz = z - this.state.pos.z;
+    if (Math.hypot(dx, dz) > 1e-6) this.state.heading = Math.atan2(-dz, dx);
+    this._apply(this._acc);
+    return this;
+  }
+  get headingDeg() { return this.state.heading / DEG; }
+  getBasePosition(out = new THREE.Vector3()) { this.root.updateMatrixWorld(true); return this.anchors.base.getWorldPosition(out); }
+  getCenterPosition(out = new THREE.Vector3()) { this.root.updateMatrixWorld(true); return this.anchors.center.getWorldPosition(out); }
+  getDimensions() {
+    const s = this.size;
+    return { baseDiameter: this.dims.baseDiameter * s, height: this.dims.height * s, centerHeight: this.dims.centerY * s, radius: this.dims.radius * s };
+  }
+  play(name, o = {}) {
+    const def = ACTIONS[name];
+    if (!def) return Promise.reject(new Error('Horse3D: hành động không tồn tại "' + name + '"'));
+    return new Promise(resolve => {
+      const tr = def(this, o);
+      tr.name = name; tr.o = o; tr.t0 = -(o.delay ?? 0); tr.resolve = resolve;
+      tr.dur = tr.dur ?? o.duration ?? 1;
+      tr.ease = EASE[o.ease] || (typeof o.ease === 'function' ? o.ease : tr.ease || EASE.inOut);
+      tr.loop = o.loop ?? tr.loop ?? false;
+      this._tracks.push(tr);
+      this._emit('start', { action: name });
+    });
+  }
+  stop(name) {
+    this._tracks = this._tracks.filter(tr => {
+      if (name && tr.name !== name) return true;
+      tr.resolve(false);
+      return false;
+    });
+    return this;
+  }
+  get busy() { return this._tracks.some(t => !t.loop); }
+  update(dt) {
+    dt = Math.min(Math.max(dt, 0), 0.1);
+    const acc = this._acc = newAcc();
+    for (const tr of this._tracks.slice()) {
+      tr.t0 += dt;
+      if (tr.t0 < 0) continue;
+      let t = tr.t0 / tr.dur;
+      if (tr.loop) t %= 1;
+      if (t >= 1 && !tr.loop) {
+        this._tracks.splice(this._tracks.indexOf(tr), 1);
+        tr.end?.(this);
+        tr.resolve(true);
+        this._emit('end', { action: tr.name });
+        if (tr.landed) this._emit('land', { action: tr.name, position: this.state.pos.clone() });
+      } else {
+        tr.step(t, acc, tr.ease(t), this);
+      }
+    }
+    this._apply(acc);
+  }
+  _apply(acc) {
+    const s = this.state;
+    this.root.position.set(s.pos.x + acc.x, s.pos.y + acc.y, s.pos.z + acc.z);
+    this.root.rotation.y = s.heading + acc.hd;
+    this.pivot.rotation.set(acc.rx, acc.ry, acc.rz);
+    this.neck.rotation.set(0, acc.ny, acc.nz);
+  }
+  on(evt, fn) { (this._ev[evt] ||= new Set()).add(fn); return () => this._ev[evt].delete(fn); }
+  off(evt, fn) { this._ev[evt]?.delete(fn); return this; }
+  _emit(evt, data) { this._ev[evt]?.forEach(f => f(data, this)); }
+  addTo(parent) { parent.add(this.root); return this; }
+  removeFrom() { this.root.removeFromParent(); return this; }
+  dispose() {
+    this.stop(); this.removeFrom();
+    this.mat.dispose(); this.socketMat.dispose(); this.beltMat.dispose();
+  }
+}
+const faceDelta = (h, dx, dz) => (Math.hypot(dx, dz) > 1e-6 ? wrapPi(Math.atan2(-dz, dx) - h.state.heading) : 0);
+function travel(h, o) {
+  const from = h.state.pos.clone();
+  const to = pt(o.to) || { x: from.x, y: from.y, z: from.z };
+  const dest = new THREE.Vector3(to.x, o.to?.y ?? from.y, to.z);
+  const delta = o.face === false ? 0 : faceDelta(h, dest.x - from.x, dest.z - from.z);
+  const dist = from.distanceTo(dest);
+  return {
+    from, dest, delta, dist,
+    apply: (acc, k, t) => {
+      acc.x += (dest.x - from.x) * k; acc.y += (dest.y - from.y) * k; acc.z += (dest.z - from.z) * k;
+      acc.hd += delta * EASE.out(Math.min(1, t / 0.3));
+    },
+    commit: () => { h.state.pos.copy(dest); h.state.heading = wrapPi(h.state.heading + delta); }
+  };
+}
+const ACTIONS = {
+  jump(h, o) {
+    const m = travel(h, o);
+    const height = (o.height ?? 4.6) * h.size, tilt = o.tilt ?? 0.2, twist = o.twist ?? 0.18;
+    return {
+      dur: o.duration ?? 1.15, ease: EASE.out, landed: true,
+      step(t, acc, k) {
+        const arc = Math.sin(Math.PI * t);
+        m.apply(acc, k, t);
+        acc.y += arc * height;
+        acc.rx += arc * tilt; acc.ry += arc * twist;
+      },
+      end: () => m.commit()
+    };
+  },
+  move(h, o) {
+    const m = travel(h, o);
+    return { dur: o.duration ?? Math.max(0.4, m.dist / (o.speed ?? 10)), step: (t, acc, k) => m.apply(acc, k, t), end: () => m.commit() };
+  },
+  turn(h, o) {
+    const dest = o.heading != null ? o.heading * DEG : (o.to ? Math.atan2(-(o.to.z - h.state.pos.z), o.to.x - h.state.pos.x) : h.state.heading);
+    const delta = wrapPi(dest - h.state.heading);
+    return { dur: o.duration ?? 0.5, step: (t, acc, k) => { acc.hd += delta * k; }, end: () => { h.state.heading = wrapPi(h.state.heading + delta); } };
+  },
+  spin(h, o) {
+    const a = (o.turns ?? 1) * TAU * (o.reverse ? -1 : 1);
+    return { dur: o.duration ?? 1.4, step: (t, acc, k) => { acc.hd += a * k; }, end: () => { h.state.heading = wrapPi(h.state.heading + a); } };
+  },
+  /** Lộn vòng (somersault) trên đường: vừa nhảy vừa xoay pitch 360° */
+  somersault(h, o) {
+    const m = travel(h, o);
+    const flips = o.flips ?? 1;
+    const height = (o.height ?? 3.2) * h.size;
+    const dir = o.reverse ? -1 : 1;
+    return {
+      dur: o.duration ?? 0.5, ease: EASE.out, landed: true,
+      step(t, acc, k) {
+        m.apply(acc, k, t);
+        acc.y += Math.sin(Math.PI * t) * height;
+        acc.rx += dir * flips * Math.PI * 2 * k;
+      },
+      end: () => m.commit()
+    };
+  },
+  nod: (h, o) => ({ dur: o.duration ?? 0.9, step: (t, acc) => { acc.nz -= (o.amp ?? 0.28) * (1 - Math.cos(t * TAU * (o.times ?? 2))) / 2; } }),
+  shake: (h, o) => ({ dur: o.duration ?? 0.9, step: (t, acc) => { acc.ny += (o.amp ?? 0.35) * Math.sin(t * TAU * (o.times ?? 3)) * Math.sin(Math.PI * t); } }),
+  idle: (h, o) => ({ dur: o.duration ?? 2.4, loop: true, ease: EASE.linear, step: (t, acc) => { acc.y += 0.12 * h.size * Math.sin(t * TAU); acc.nz += 0.03 * Math.sin(t * TAU + 1); } })
+};
+
+/* ═══════════════════════════════════════════════════════════════
+   BOARD + GAME LOGIC
+   ═══════════════════════════════════════════════════════════════ */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x080704);
+const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, .1, 200);
+camera.position.set(0, 31, 29);
+camera.lookAt(0, 0, 0);
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xfff2c4, 0x261400, 1.25));
+const sun = new THREE.DirectionalLight(0xffffff, 2.1);
+sun.position.set(-14, 28, 18);
+sun.castShadow = true;
+scene.add(sun);
+const warm = new THREE.PointLight(0xffb300, 1.5, 60);
+warm.position.set(18, 14, -14);
+scene.add(warm);
+
+const GRID = 40, W = 28, S = W / GRID;
+function P(x, y, h = 0) { return new THREE.Vector3((x - 20) * S, h, (20 - y) * S); }
+
+/* —— bàn 40×40 —— */
+const boardMat = new THREE.MeshPhysicalMaterial({ color: 0xc99716, metalness: .9, roughness: .23, clearcoat: 1, clearcoatRoughness: .12 });
+const board = new THREE.Mesh(new THREE.BoxGeometry(W, .75, W), boardMat);
+board.position.y = -.42;
+board.receiveShadow = true;
+scene.add(board);
+
+const rimMat = new THREE.MeshStandardMaterial({ color: 0xf6d36a, metalness: 1, roughness: .16 });
+const dishMat = new THREE.MeshPhysicalMaterial({ color: 0xa9780b, metalness: .85, roughness: .3, clearcoat: .35 });
+const rimGeo = new THREE.TorusGeometry(S * .98, S * .10, 14, 36);
+rimGeo.rotateX(Math.PI / 2);
+const dishGeo = new THREE.CylinderGeometry(S * .83, S * .94, S * .10, 36);
+
+// 4 màu chuẩn: đỏ #c00000, xanh #2012e0, vàng #fff000, cyan #0bd9ce
+const COL = { red: 0xc00000, blue: 0x2012e0, yellow: 0xfff000, cyan: 0x0bd9ce };
+function makePathMat(hex) {
+  return new THREE.MeshBasicMaterial({ color: hex });
+}
+const pathYellowMat = makePathMat(COL.yellow);
+const pathCyanMat   = makePathMat(COL.cyan);
+const pathRedMat    = makePathMat(COL.red);
+const pathBlueMat   = makePathMat(COL.blue);
+/** Gán màu nút theo góc phần tư / gần chuồng nào */
+function pathMatFor(x, y) {
+  // Ưu tiên gần chuồng 14×14
+  // SW vàng (0,0)-(14,14), SE đỏ (26,0)-(40,14), NE cyan (26,26)-(40,40), NW xanh (0,26)-(14,40)
+  const dSW = Math.hypot(x - 7, y - 7);
+  const dSE = Math.hypot(x - 33, y - 7);
+  const dNE = Math.hypot(x - 33, y - 33);
+  const dNW = Math.hypot(x - 7, y - 33);
+  const m = Math.min(dSW, dSE, dNE, dNW);
+  if (m === dSW) return pathYellowMat;
+  if (m === dSE) return pathRedMat;
+  if (m === dNE) return pathCyanMat;
+  return pathBlueMat;
+}
+const blackRingMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+const blackRingGeo = new THREE.TorusGeometry(S * 1.08, S * 0.07, 10, 36);
+blackRingGeo.rotateX(Math.PI / 2);
+function slot(x, y) {
+  const g = new THREE.Group(), p = P(x, y, .015);
+  g.position.copy(p);
+  const pm = pathMatFor(x, y);
+  // viền đen ngoài
+  const br = new THREE.Mesh(blackRingGeo, blackRingMat);
+  br.position.y = -.012;
+  g.add(br);
+  const r = new THREE.Mesh(rimGeo, pm);
+  r.position.y = -.005;
+  g.add(r);
+  const d = new THREE.Mesh(dishGeo, pm);
+  d.position.y = .002;
+  g.add(d);
+  scene.add(g);
+}
+function linePoints(x1, y1, x2, y2) { let a = []; for (let i = 0; i < 6; i++) { let t = i / 5; a.push([x1 + (x2 - x1) * t, y1 + (y2 - y1) * t]); } return a; }
+function rot(x, y, a) { let dx = x - 20, dy = y - 20, r = a * Math.PI / 180; return [20 + dx * Math.cos(r) - dy * Math.sin(r), 20 + dx * Math.sin(r) + dy * Math.cos(r)]; }
+
+const raisedTextColors = [0xffffff, 0x171717, 0xffffff, 0xffffff];
+let raisedFont = null;
+const raisedTextQueue = [];
+const RAISED_TEXT_SIZE = S * 1.5;
+const RAISED_TEXT_DEPTH = .055;
+function addRaisedNumber(g, num, frameIndex) {
+  if (!raisedFont || typeof THREE.TextGeometry !== 'function') { raisedTextQueue.push([g, num, frameIndex]); return; }
+  const geom = new THREE.TextGeometry(String(num), {
+    font: raisedFont, size: RAISED_TEXT_SIZE, height: RAISED_TEXT_DEPTH,
+    curveSegments: 8, bevelEnabled: true, bevelThickness: .018, bevelSize: .012, bevelSegments: 2
+  });
+  geom.computeBoundingBox();
+  const bb = geom.boundingBox;
+  const cx = (bb.max.x + bb.min.x) / 2, cz = (bb.max.y + bb.min.y) / 2;
+  geom.translate(-cx, -cz, 0);
+  geom.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshStandardMaterial({
+    color: raisedTextColors[frameIndex], metalness: .28, roughness: .20,
+    emissive: raisedTextColors[frameIndex], emissiveIntensity: .08
+  });
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.rotation.y = -frameIndex * Math.PI / 2;
+  if (frameIndex === 1 || frameIndex === 3) mesh.rotation.y += Math.PI;
+  mesh.position.y = .095;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  g.add(mesh);
+}
+if (typeof THREE.FontLoader === 'function') {
+  try {
+    const raisedFontLoader = new THREE.FontLoader();
+    raisedFontLoader.load('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/fonts/helvetiker_bold.typeface.json', font => {
+      raisedFont = font;
+      for (const item of raisedTextQueue) addRaisedNumber(item[0], item[1], item[2]);
+      raisedTextQueue.length = 0;
+    }, undefined, function(err){ console.warn('font load fail', err); });
+  } catch (e) { console.warn('FontLoader', e); }
+}
+
+const seen = new Set();
+for (let aidx = 0; aidx < 4; aidx++) {
+  const a = [0, 90, 180, 270][aidx];
+  for (let li = 0; li < 3; li++) {
+    const seg = [[16, 1, 16, 16], [20, 4, 20, 18], [24, 1, 24, 16]][li];
+    const nPts = (li === 1) ? 6 : 7; // home 6, outer arms 7 → 13 nút quanh chuồng
+    for (let i = 0; i < nPts; i++) {
+      const t = i / (nPts - 1), q = rot(seg[0] + (seg[2] - seg[0]) * t, seg[1] + (seg[3] - seg[1]) * t, a);
+      const x = Math.round(q[0] * 1e6) / 1e6, y = Math.round(q[1] * 1e6) / 1e6, k = x + ',' + y;
+      if (!seen.has(k)) { seen.add(k); slot(x, y); }
+    }
+  }
+  const edgeNodeMats = [
+    { rim: makePathMat(COL.red), dish: makePathMat(COL.red) },
+    { rim: makePathMat(COL.cyan), dish: makePathMat(COL.cyan) },
+    { rim: makePathMat(COL.blue), dish: makePathMat(COL.blue) },
+    { rim: makePathMat(COL.yellow), dish: makePathMat(COL.yellow) }
+  ];
+  const q = rot(20, 1, a), x = Math.round(q[0] * 1e6) / 1e6, y = Math.round(q[1] * 1e6) / 1e6, k = x + ',' + y;
+  if (!seen.has(k)) {
+    seen.add(k);
+    const g = new THREE.Group();
+    g.position.copy(P(x, y, .015));
+    const br = new THREE.Mesh(blackRingGeo, blackRingMat);
+    br.position.y = -.012;
+    g.add(br);
+    const r = new THREE.Mesh(rimGeo, edgeNodeMats[aidx].rim);
+    r.position.y = -.005;
+    g.add(r);
+    const d = new THREE.Mesh(dishGeo, edgeNodeMats[aidx].dish);
+    d.position.y = .002;
+    g.add(d);
+    scene.add(g);
+
+    const arrowStart = rot(20, 1, a);
+    const arrowEnd = rot(20, 4, a);
+    const dx = arrowEnd[0] - arrowStart[0];
+    const dz = -(arrowEnd[1] - arrowStart[1]);
+    const angle = Math.atan2(dz, dx);
+    const arrowColors = [0xffffff, 0x171717, 0xffffff, 0xffffff];
+    const arrowMat = new THREE.MeshPhysicalMaterial({
+      color: arrowColors[aidx], metalness: .30, roughness: .18, clearcoat: .75, clearcoatRoughness: .08,
+      emissive: arrowColors[aidx], emissiveIntensity: .05
+    });
+    const arrow = new THREE.Group();
+    arrow.position.copy(P(arrowStart[0], arrowStart[1], .23));
+    arrow.rotation.y = -angle;
+    const L = S * 1.60, Warr = S * .72, headL = S * .62, stemW = S * .30;
+    const stemBack = -(L / 2), headTip = L / 2, headBase = headTip - headL;
+    const shape = new THREE.Shape();
+    shape.moveTo(stemBack, -stemW / 2);
+    shape.lineTo(headBase, -stemW / 2);
+    shape.lineTo(headBase, -Warr / 2);
+    shape.lineTo(headTip, 0);
+    shape.lineTo(headBase, Warr / 2);
+    shape.lineTo(headBase, stemW / 2);
+    shape.lineTo(stemBack, stemW / 2);
+    shape.closePath();
+    const arrowGeo = new THREE.ExtrudeGeometry(shape, { depth: .075, bevelEnabled: true, bevelThickness: .018, bevelSize: .012, bevelSegments: 2, curveSegments: 2 });
+    arrowGeo.center();
+    const arrowMesh = new THREE.Mesh(arrowGeo, arrowMat);
+    arrowMesh.rotation.x = -Math.PI / 2;
+    arrowMesh.position.y = .055;
+    arrowMesh.castShadow = true;
+    arrowMesh.receiveShadow = true;
+    arrow.add(arrowMesh);
+    scene.add(arrow);
+  }
+}
+
+const crossMats = [
+  { rim: makePathMat(COL.red), dish: makePathMat(COL.red) },
+  { rim: makePathMat(COL.cyan), dish: makePathMat(COL.cyan) },
+  { rim: makePathMat(COL.blue), dish: makePathMat(COL.blue) },
+  { rim: makePathMat(COL.yellow), dish: makePathMat(COL.yellow) }
+];
+for (let aidx = 0; aidx < 4; aidx++) {
+  const a = [0, 90, 180, 270][aidx];
+  for (let i = 0; i < 6; i++) {
+    const t = i / 5;
+    const q = rot(20, 4 + (18 - 4) * t, a);
+    const x = Math.round(q[0] * 1e6) / 1e6;
+    const y = Math.round(q[1] * 1e6) / 1e6;
+    const g = new THREE.Group();
+    g.position.copy(P(x, y, .015));
+    const br = new THREE.Mesh(blackRingGeo, blackRingMat);
+    br.position.y = -.012;
+    g.add(br);
+    const r = new THREE.Mesh(rimGeo, crossMats[aidx].rim);
+    r.position.y = -.005;
+    g.add(r);
+    const d = new THREE.Mesh(dishGeo, crossMats[aidx].dish);
+    d.position.y = .002;
+    g.add(d);
+    addRaisedNumber(g, i + 1, aidx);
+    scene.add(g);
+  }
+}
+
+/* —— 4 chuồng 14×14 —— */
+function makePenMat(hex) {
+  return new THREE.MeshBasicMaterial({ color: hex });
+}
+const blackGlossMat = makePenMat(0xfff000); // Vàng SW
+const ivoryMat      = makePenMat(0x0bd9ce); // Cyan NE
+const flagRedMat    = makePenMat(0xc00000); // Đỏ SE
+const skyBlueMat    = makePenMat(0x2012e0); // Xanh NW
+function spawnBackgroundWithMat(x, y, w, h, mat) {
+  const g = new THREE.Mesh(new THREE.BoxGeometry(w * S, .055, h * S), mat);
+  g.position.copy(P(x + w / 2, y + h / 2, .018));
+  g.receiveShadow = true;
+  scene.add(g);
+}
+spawnBackgroundWithMat(0, 0, 14, 14, blackGlossMat);
+spawnBackgroundWithMat(26, 26, 14, 14, ivoryMat);
+spawnBackgroundWithMat(26, 0, 14, 14, flagRedMat);
+spawnBackgroundWithMat(0, 26, 14, 14, skyBlueMat);
+
+/* —— gờ bao —— */
+const borderMat = new THREE.MeshStandardMaterial({ color: 0xf6d36a, metalness: .95, roughness: .18 });
+const BORDER_WIDTH = S * .20;
+const BORDER_HEIGHT = .22;
+function borderLine(x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy);
+  if (L <= 0) return;
+  const g = new THREE.BoxGeometry(L * S, BORDER_HEIGHT, BORDER_WIDTH);
+  const m = new THREE.Mesh(g, borderMat);
+  m.position.copy(P((x1 + x2) / 2, (y1 + y2) / 2, .16));
+  m.rotation.y = -Math.atan2(dy, dx);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  scene.add(m);
+}
+function borderRect(x, y, w, h) {
+  borderLine(x, y, x + w, y);
+  borderLine(x + w, y, x + w, y + h);
+  borderLine(x + w, y + h, x, y + h);
+  borderLine(x, y + h, x, y);
+}
+borderRect(0, 0, 40, 40);
+borderRect(0, 0, 14, 14);
+borderRect(0, 26, 14, 14);
+borderRect(26, 26, 14, 14);
+borderRect(26, 0, 14, 14);
+borderLine(18, 18, 22, 22);
+borderLine(18, 22, 22, 18);
+const E0 = 2.5, E1 = 37.5;
+borderLine(18, 22, 18, E1);
+borderLine(22, 22, 22, E1);
+borderLine(18, 18, 18, E0);
+borderLine(22, 18, 22, E0);
+borderLine(18, 18, E0, 18);
+borderLine(18, 22, E0, 22);
+borderLine(22, 18, E1, 18);
+borderLine(22, 22, E1, 22);
+borderLine(18, E1, 22, E1);
+borderLine(18, E0, 22, E0);
+borderLine(E0, 18, E0, 22);
+borderLine(E1, 18, E1, 22);
+
+/* —— OrbitControls —— */
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0);
+controls.enableDamping = true;
+controls.dampingFactor = .08;
+controls.enablePan = false;
+controls.enableRotate = true;
+controls.enableZoom = true;
+controls.maxPolarAngle = 1.45;
+controls.minPolarAngle = .30;
+function setPhoneZoomLimits() {
+  try {
+    const halfBoard = W / 2;
+    const fov = camera.fov || 38;
+    const halfFovY = THREE.MathUtils.degToRad(fov / 2);
+    const iw = Math.max(1, innerWidth || 360);
+    const ih = Math.max(1, innerHeight || 640);
+    const aspect = Math.max(0.35, Math.min(3, camera.aspect || (iw / ih)));
+    const halfFovX = Math.atan(Math.tan(halfFovY) * aspect);
+    const fillW = halfBoard / Math.max(1e-4, Math.tan(halfFovX));
+    const minD = Math.max(6, fillW * 0.7);
+    const longShort = Math.max(iw, ih) / Math.min(iw, ih);
+    let polar = Math.PI / 4;
+    try {
+      if (controls && typeof controls.getPolarAngle === 'function') polar = controls.getPolarAngle();
+      else polar = Math.atan2(Math.hypot(camera.position.x, camera.position.z), Math.max(0.01, camera.position.y));
+    } catch (e) {}
+    const cosEl = Math.max(0.35, Math.sin(Math.max(0.15, polar)));
+    const needVert = halfBoard / (Math.tan(halfFovY) * cosEl);
+    let maxD = Math.max(minD * longShort * 2.0, needVert * 1.15, minD * 3.0, 40);
+    if (!(maxD > minD)) maxD = minD * 3;
+    if (!isFinite(minD) || !isFinite(maxD)) return;
+    controls.minDistance = minD;
+    controls.maxDistance = maxD;
+    controls.enableZoom = true;
+  } catch (e) {
+    console.warn('setPhoneZoomLimits', e);
+    controls.minDistance = 8;
+    controls.maxDistance = 60;
+  }
+}
+camera.position.set(0, 31, 29);
+setPhoneZoomLimits();
+controls.update();
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  setPhoneZoomLimits();
+  controls.update();
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   PENS + HORSES
+   Đường kính đáy = 2 (grid units) → world diam = 2*S
+   size = (2*S) / 8
+   Lưới đặt quân: step 2, inset 2 → không chồng tường (radius 1)
+   ═══════════════════════════════════════════════════════════════ */
+const HORSE_BASE_DIAM_GRID = 2;
+const HORSE_SIZE = (HORSE_BASE_DIAM_GRID * S) / HORSE_STANDARD.BASE_DIAMETER;
+const MIN_CENTER_DIST = HORSE_BASE_DIAM_GRID; // grid units
+
+/* 4 chuồng: origin (x0,y0), màu ngựa, hướng ban đầu */
+const PENS = [
+  { id: 0, x0: 0,  y0: 0,  color: 0xfff000, name: 'Vàng',  heading: HEADING.NORTH },
+  { id: 1, x0: 26, y0: 26, color: 0x0bd9ce, name: 'Xanh ngọc', heading: HEADING.SOUTH },
+  { id: 2, x0: 26, y0: 0,  color: 0xc00000, name: 'Đỏ',    heading: HEADING.WEST  },
+  { id: 3, x0: 0,  y0: 26, color: 0x2012e0, name: 'Xanh',  heading: HEADING.EAST  }
+];
+
+/** Sinh tất cả điểm lưới hợp lệ trong chuồng (không chồng tường). */
+function penGridSlots(pen) {
+  const slots = [];
+  // step 2, từ 2 → 12 (cách mép ≥ 2 grid units → bán kính 1 an toàn)
+  for (let i = 2; i <= 12; i += 2) {
+    for (let j = 2; j <= 12; j += 2) {
+      slots.push({ gx: pen.x0 + i, gy: pen.y0 + j });
+    }
+  }
+  return slots;
+}
+
+/** 4 vị trí xuất phát ban đầu (góc trong của lưới 6×6). */
+function initialSlots(pen) {
+  return [
+    { gx: pen.x0 + 4,  gy: pen.y0 + 4  },
+    { gx: pen.x0 + 4,  gy: pen.y0 + 10 },
+    { gx: pen.x0 + 10, gy: pen.y0 + 4  },
+    { gx: pen.x0 + 10, gy: pen.y0 + 10 }
+  ];
+}
+
+const allHorses = [];
+const horseByRoot = new Map();
+
+PENS.forEach(pen => {
+  const inits = initialSlots(pen);
+  inits.forEach((slot, idx) => {
+    const wp = P(slot.gx, slot.gy, 0);
+    const horse = new Horse3D({
+      color: pen.color,
+      material: 'plastic',
+      size: HORSE_SIZE,
+      heading: pen.heading,
+      position: { x: wp.x, y: 0, z: wp.z },
+      penId: pen.id
+    });
+    horse.gridX = slot.gx;
+    horse.gridY = slot.gy;
+    horse.addTo(scene);
+    allHorses.push(horse);
+    
+horseByRoot.set(horse.root, horse);
+  });
+});
+
+/* —— Icon ngựa (pen + START), hướng = mũi tên lên chuồng —— */
+const ICON_FILE = { 0: 'icon_yellow.png', 1: 'icon_cyan.png', 2: 'icon_red.png', 3: 'icon_blue.png' };
+// Hướng mũi tên lên chuồng (grid): từ ENTRY vào home
+const ARROW_DIR_GRID = {
+  0: { dx: 1, dy: 0 },   // vàng ENTRY (1,20) → home +X
+  1: { dx: -1, dy: 0 },  // cyan ENTRY (39,20) → home -X
+  2: { dx: 0, dy: 1 },   // đỏ ENTRY (20,1) → home +Y
+  3: { dx: 0, dy: -1 }   // xanh ENTRY (20,39) → home -Y
+};
+const START_CELL = { 0: [1,16], 1: [39,24], 2: [24,1], 3: [16,39] };
+const ENTRY_CELL = { 0: [1,20], 1: [39,20], 2: [20,1], 3: [20,39] };
+
+function iconRotationZ(colorId) {
+  // Xoay ngược chiều kim đồng hồ theo yêu cầu:
+  // đỏ 0°, hồng/cyan 90°, xanh 180°, vàng 270°
+  const deg = { 2: 0, 1: 90, 3: 180, 0: 270 };
+  return ((deg[colorId] != null ? deg[colorId] : 0) * Math.PI) / 180;
+}
+
+const _texLoader = new THREE.TextureLoader();
+function placeColorIcons(colorId) {
+  _texLoader.load(ICON_FILE[colorId], function(tex) {
+    tex.encoding = THREE.sRGBEncoding;
+    tex.anisotropy = 8;
+    tex.premultiplyAlpha = false;
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, alphaTest: 0.08,
+      depthWrite: false, side: THREE.DoubleSide
+    });
+    const rotZ = iconRotationZ(colorId);
+    const pen = PENS[colorId];
+    // Tỷ lệ 3/4 ô chứa: chuồng 14×14 → cạnh decal = 14*S*0.75
+    const penSide = 14 * S * 0.75;
+    // Plane vuông (ảnh đã crop trong suốt) — vừa 3/4 chuồng
+    const m1 = new THREE.Mesh(new THREE.PlaneGeometry(penSide, penSide), mat);
+    m1.position.copy(P(pen.x0 + 7, pen.y0 + 7, 0.20));
+    m1.rotation.x = -Math.PI / 2;
+    m1.rotation.z = rotZ;
+    m1.renderOrder = 4;
+    scene.add(m1);
+    // Ô xuất quân (START): đường kính nút ≈ 2*S → 3/4
+    const st = START_CELL[colorId];
+    const startSide = 2 * S * 0.75;
+    const m2 = new THREE.Mesh(new THREE.PlaneGeometry(startSide, startSide), mat.clone());
+    m2.position.copy(P(st[0], st[1], 0.30));
+    m2.rotation.x = -Math.PI / 2;
+    m2.rotation.z = rotZ;
+    m2.renderOrder = 5;
+    scene.add(m2);
+  });
+}
+[0,1,2,3].forEach(placeColorIcons);
+
+
+/* —— markers (dấu chấm vị trí khả thi) —— */
+const markerGroup = new THREE.Group();
+scene.add(markerGroup);
+const markerGeo = new THREE.SphereGeometry(S * 0.38, 16, 12);
+const markerMat = new THREE.MeshPhysicalMaterial({
+  color: 0xffe066, metalness: 0.2, roughness: 0.25,
+  emissive: 0xffc000, emissiveIntensity: 0.55,
+  transparent: true, opacity: 0.92
+});
+let activeMarkers = []; // { mesh, gx, gy }
+
+function clearMarkers() {
+  while (markerGroup.children.length) {
+    const m = markerGroup.children[0];
+    markerGroup.remove(m);
+    m.geometry?.dispose?.();
+  }
+  activeMarkers = [];
+}
+
+function showValidMarkers(horse) {
+  clearMarkers();
+  // Mọi ô trống trong CẢ 4 chuồng 14×14
+  const occupied = new Set();
+  allHorses.forEach(h => {
+    if (h !== horse) occupied.add(h.gridX + ',' + h.gridY);
+  });
+  PENS.forEach(pen => {
+    penGridSlots(pen).forEach(s => {
+      const key = s.gx + ',' + s.gy;
+      if (occupied.has(key)) return;
+      const wp = P(s.gx, s.gy, 0.12);
+      const mesh = new THREE.Mesh(markerGeo, markerMat.clone());
+      mesh.position.copy(wp);
+      mesh.userData.marker = true;
+      mesh.userData.gx = s.gx;
+      mesh.userData.gy = s.gy;
+      markerGroup.add(mesh);
+      activeMarkers.push({ mesh, gx: s.gx, gy: s.gy });
+    });
+  });
+}
+
+/* —— interaction —— */
+let selectedHorse = null;
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let pointerDownPos = null;
+const CLICK_THRESH = 8; // px
+
+/* Âm thanh: a2.mp3 khi chọn quân, a1.mp3 khi nhảy xong (cùng thư mục với HTML) */
+const sfxSelect = new Audio('a2.mp3');
+const sfxLand = new Audio('a1.mp3');
+const sfxKickHit = new Audio('a4a.mp3'); // đá chạm khi hạ
+const sfxSpinTap = new Audio('a4b.mp3'); // mỗi vòng lộn chạm chân
+const sfxFlyAway = new Audio('a5.mp3');  // bay về / bay
+sfxKickHit.preload = 'auto';
+sfxSpinTap.preload = 'auto';
+sfxFlyAway.preload = 'auto';
+sfxSelect.preload = 'auto';
+sfxLand.preload = 'auto';
+function playSfx(audio) {
+  try {
+    audio.pause();
+    audio.currentTime = 0;
+    const p = audio.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch (_) {}
+}
+
+function getPointerNDC(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  const cx = (e.clientX !== undefined) ? e.clientX : (e.touches ? e.touches[0].clientX : e.changedTouches[0].clientX);
+  const cy = (e.clientY !== undefined) ? e.clientY : (e.touches ? e.touches[0].clientY : e.changedTouches[0].clientY);
+  pointer.x = ((cx - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((cy - rect.top) / rect.height) * 2 + 1;
+  return { x: cx, y: cy };
+}
+
+function deselect() {
+  if (selectedHorse) {
+    selectedHorse.stop('idle');
+    selectedHorse = null;
+  }
+  clearMarkers();
+}
+
+function selectHorse(horse) {
+  if (selectedHorse === horse) return;
+  deselect();
+  selectedHorse = horse;
+  playSfx(sfxSelect);
+  horse.play('idle', { duration: 2.2 });
+  showValidMarkers(horse);
+}
+
+async function moveHorseTo(horse, gx, gy) {
+  if (horse.busy) return;
+  const wp = P(gx, gy, 0);
+  clearMarkers();
+  horse.stop('idle');
+  // nhảy hình sin (arc)
+  const dist = Math.hypot(gx - horse.gridX, gy - horse.gridY);
+  const jumpH = 3.2 + Math.min(dist * 0.35, 4);
+  await horse.play('jump', {
+    to: { x: wp.x, z: wp.z },
+    height: jumpH / horse.size, // play nhân thêm size
+    duration: 0.55 + dist * 0.08,
+    face: true
+  });
+  playSfx(sfxLand);
+  horse.gridX = gx;
+  horse.gridY = gy;
+  selectedHorse = null;
+}
+
+function onPointerDown(e) {
+  const p = getPointerNDC(e);
+  pointerDownPos = { x: p.x, y: p.y };
+}
+
+function onPointerUp(e) {
+  if (!pointerDownPos) return;
+  const p = getPointerNDC(e);
+  const dx = p.x - pointerDownPos.x, dy = p.y - pointerDownPos.y;
+  pointerDownPos = null;
+  if (Math.hypot(dx, dy) > CLICK_THRESH) return; // drag → orbit, bỏ qua
+
+  raycaster.setFromCamera(pointer, camera);
+
+  // 1) ưu tiên marker
+  if (activeMarkers.length && selectedHorse) {
+    const markerMeshes = activeMarkers.map(m => m.mesh);
+    const hits = raycaster.intersectObjects(markerMeshes, false);
+    if (hits.length) {
+      const m = hits[0].object;
+      moveHorseTo(selectedHorse, m.userData.gx, m.userData.gy);
+      return;
+    }
+  }
+
+  // 2) chọn quân
+  const horseRoots = allHorses.map(h => h.root);
+  const hits = raycaster.intersectObjects(horseRoots, true);
+  if (hits.length) {
+    let obj = hits[0].object;
+    while (obj && !obj.userData.horse3d) obj = obj.parent;
+    if (obj && obj.userData.horse3d) {
+      const h = obj.userData.horse3d;
+      if (h.busy) return;
+      selectHorse(h);
+      return;
+    }
+  }
+
+  // 3) click trống → bỏ chọn
+  deselect();
+}
+
+renderer.domElement.addEventListener('pointerdown', onPointerDown, { passive: true });
+renderer.domElement.addEventListener('pointerup', onPointerUp, { passive: true });
+
+
+
+/* ═══════════════ BoardAPI (game controller) ═══════════════ */
+let gameMode = false;
+let choiceButtons = [];
+const choiceGroup = new THREE.Group();
+scene.add(choiceGroup);
+let selectMode = null; // null | 'horse' | 'choice'
+let selectableLogicIds = new Set();
+let pendingSelectMoves = []; // moves waiting horse pick
+let blinkT = 0;
+
+function makeChoiceTexture(text, sub, accent) {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 192;
+  const ctx = c.getContext('2d');
+  const grd = ctx.createLinearGradient(0, 0, 0, 192);
+  grd.addColorStop(0, 'rgba(20,16,10,0.92)');
+  grd.addColorStop(1, 'rgba(40,28,12,0.92)');
+  ctx.fillStyle = grd;
+  roundRect(ctx, 8, 8, 496, 176, 28); ctx.fill();
+  ctx.strokeStyle = accent || '#f6d36a'; ctx.lineWidth = 6;
+  roundRect(ctx, 8, 8, 496, 176, 28); ctx.stroke();
+  ctx.fillStyle = '#fde68a';
+  ctx.font = '700 48px system-ui,sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, 256, 70);
+  if (sub) {
+    ctx.fillStyle = '#e7e5e4';
+    ctx.font = '500 32px system-ui,sans-serif';
+    ctx.fillText(sub, 256, 130);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.needsUpdate = true;
+  return tex;
+}
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function clearChoiceButtons() {
+  while (choiceGroup.children.length) {
+    const m = choiceGroup.children[0];
+    choiceGroup.remove(m);
+    if (m.material) {
+      if (m.material.map) m.material.map.dispose();
+      m.material.dispose();
+    }
+  }
+  choiceButtons = [];
+}
+function showChoiceButtons(moves) {
+  clearChoiceButtons(); clearMarkers();
+  const labels = { exit: 'XUẤT QUÂN', move: 'DI CHUYỂN', kick: 'ĐÁ QUÂN', kick_rear: 'ĐÁ HẬU', home: 'LÊN CHUỒNG' };
+  const accents = { exit: '#4ade80', move: '#fbbf24', kick: '#f87171', kick_rear: '#fb7185', home: '#60a5fa' };
+  moves.forEach((mv, i) => {
+    const title = labels[mv.type] || mv.type.toUpperCase();
+    const sub = (mv.steps ? (mv.steps + ' bước') : '') + (mv.kickId != null ? ' ⚡đá' : '');
+    const tex = makeChoiceTexture(title, sub || ('#' + ((mv.horseSlot|0) + 1)), accents[mv.type]);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false });
+    const sp = new THREE.Sprite(mat);
+    sp.scale.set(S * 5.2, S * 2.0, 1);
+    const wp = P(mv.toGx, mv.toGy, 0);
+    sp.position.set(wp.x, 2.8 + (i % 3) * 0.35, wp.z);
+    sp.userData.choice = mv;
+    sp.renderOrder = 20;
+    choiceGroup.add(sp);
+    choiceButtons.push({ mesh: sp, move: mv });
+    const mk = new THREE.Mesh(markerGeo, markerMat.clone());
+    mk.position.copy(P(mv.toGx, mv.toGy, 0.12));
+    markerGroup.add(mk);
+    activeMarkers.push({ mesh: mk, gx: mv.toGx, gy: mv.toGy });
+  });
+}
+
+async function animateSteps(horse, cells, opts) {
+  if (!horse || !cells || !cells.length) return;
+  opts = opts || {};
+  horse.stop('idle');
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    const wp = P(c.gx, c.gy, 0);
+    const dist = Math.hypot(c.gx - horse.gridX, c.gy - horse.gridY);
+    const jumpH = 2.8 + Math.min(dist * 0.25, 3);
+    const dur = 0.42 + Math.min(dist * 0.05, 0.25);
+    const isLast = (i === cells.length - 1);
+    const kickLast = opts.kickLast && isLast;
+    if (kickLast) {
+      // jump with mid-descend SFX
+      const p = horse.play('jump', {
+        to: { x: wp.x, z: wp.z },
+        height: jumpH / horse.size,
+        duration: dur,
+        face: true
+      });
+      // khi bắt đầu hạ (nửa sau) → a4a
+      setTimeout(function(){ playSfx(sfxKickHit); }, dur * 500);
+      await p;
+    } else {
+      await horse.play('jump', {
+        to: { x: wp.x, z: wp.z },
+        height: jumpH / horse.size,
+        duration: dur,
+        face: true
+      });
+      if (!opts.silentLand) playSfx(sfxLand);
+    }
+    horse.gridX = c.gx;
+    horse.gridY = c.gy;
+  }
+}
+
+/**
+ * Đá: khi quân đá hạ → nạn nhân lộn vòng 3 bước theo hướng (a4b mỗi bước),
+ * nháy 3 lần, bay về chuồng (a5 + a1).
+ * opts.dirWorld = {x,z} hướng lộn (unit-ish)
+ * opts.reverse = true nếu đá hậu (lộn ngược)
+ */
+async function animateKickReturn(horse, toGx, toGy, opts) {
+  if (!horse) return;
+  opts = opts || {};
+  horse.stop('idle');
+  // Hướng lộn: ưu tiên dirWorld; mặc định theo heading hiện tại
+  let dx = 0, dz = -1;
+  if (opts.dirWorld) {
+    dx = opts.dirWorld.x; dz = opts.dirWorld.z;
+  } else {
+    const hd = horse.state.heading || 0;
+    dx = Math.sin(hd); dz = -Math.cos(hd);
+  }
+  const len = Math.hypot(dx, dz) || 1;
+  dx /= len; dz /= len;
+  if (opts.reverse) { dx = -dx; dz = -dz; }
+  const stepDist = S * 2.8; // ~1 ô
+  for (let i = 0; i < 3; i++) {
+    const tx = horse.state.pos.x + dx * stepDist;
+    const tz = horse.state.pos.z + dz * stepDist;
+    playSfx(sfxSpinTap);
+    await horse.play('somersault', {
+      to: { x: tx, z: tz },
+      height: 3.5 / horse.size,
+      duration: 0.48,
+      flips: 1,
+      reverse: !!opts.reverse
+    });
+  }
+  // nháy 3 lần
+  const root = horse.root;
+  for (let f = 0; f < 3; f++) {
+    root.visible = false;
+    await new Promise(r => setTimeout(r, 90));
+    root.visible = true;
+    await new Promise(r => setTimeout(r, 90));
+  }
+  // bay về chuồng: a5 rồi a1 khi kết thúc
+  playSfx(sfxFlyAway);
+  const wp = P(toGx, toGy, 0);
+  await horse.play('jump', {
+    to: { x: wp.x, z: wp.z },
+    height: 10 / horse.size,
+    duration: 0.95,
+    face: true
+  });
+  playSfx(sfxLand); // a1
+  horse.gridX = toGx;
+  horse.gridY = toGy;
+}
+
+function findHorseByLogicId(logicId) {
+  let horse = allHorses.find(x => x.logicId === logicId);
+  if (!horse) {
+    const cid = Math.floor(logicId / 4), slot = logicId % 4;
+    const list = allHorses.filter(x => x.penId === cid);
+    horse = list[slot];
+    if (horse) horse.logicId = logicId;
+  }
+  return horse || null;
+}
+
+function syncFromState(payload) {
+  if (!payload || !payload.horses) return;
+  payload.horses.forEach(hs => {
+    let h = allHorses.find(x => x.logicId === hs.id);
+    if (!h) {
+      const penHorses = allHorses.filter(x => x.penId === hs.colorId);
+      h = penHorses[hs.slotIndex] || null;
+      if (h) h.logicId = hs.id;
+    }
+    if (!h) return;
+    const wp = P(hs.gx, hs.gy, 0);
+    h.setPosition({ x: wp.x, y: 0, z: wp.z });
+    h.gridX = hs.gx;
+    h.gridY = hs.gy;
+  });
+}
+
+/** Camera xuất chuồng: nhìn về phía ô START (điểm xuất quân) để thấy ngựa ra chuồng trọn vẹn */
+function cameraToPen(colorId) {
+  // Tâm nhìn = midpoint giữa tâm chuồng và ô xuất phát
+  const pens = {
+    0: { x: 7, y: 7 },
+    1: { x: 33, y: 33 },
+    2: { x: 33, y: 7 },
+    3: { x: 7, y: 33 }
+  };
+  const starts = {
+    0: { x: 1, y: 16 },
+    1: { x: 39, y: 24 },
+    2: { x: 24, y: 1 },
+    3: { x: 16, y: 39 }
+  };
+  const pen = pens[colorId] || pens[2];
+  const st = starts[colorId] || starts[2];
+  const mid = { x: (pen.x + st.x) / 2, y: (pen.y + st.y) / 2 };
+  const target = P(mid.x, mid.y, 0.5);
+  controls.target.copy(target);
+  // Hướng camera: từ phía chuồng nhìn ra START (nhìn theo hướng xuất quân)
+  const penW = P(pen.x, pen.y, 0);
+  const stW = P(st.x, st.y, 0);
+  const dir = new THREE.Vector3().subVectors(stW, penW).normalize();
+  // Đặt camera phía sau chuồng, hơi cao, nhìn về START
+  const dist = 16;
+  const el = 0.55; // ~31° nâng, gần 45° cảm nhận
+  camera.position.set(
+    penW.x - dir.x * dist * 0.35 + dir.z * 4,
+    11,
+    penW.z - dir.z * dist * 0.35 - dir.x * 4
+  );
+  // tinh chỉnh: đảm bảo nhìn thấy cả pen và START
+  camera.position.y = Math.max(camera.position.y, 9);
+  controls.enableRotate = true;
+  controls.enableZoom = true;
+    controls.maxPolarAngle = 1.35;
+  controls.minPolarAngle = 0.25;
+  controls.update();
+  camera.lookAt(target);
+  controls.target.copy(target);
+  controls.update();
+}
+
+/** Camera di chuyển: top-down, zoom min = bàn cờ vừa chiều ngang màn hình, tâm trùng tâm board */
+function cameraTopDown() {
+  controls.target.set(0, 0, 0);
+  controls.enableRotate = true;
+  controls.enableZoom = true;
+  controls.enablePan = false;
+  controls.minPolarAngle = 0.02;
+  controls.maxPolarAngle = 0.60;
+  // Dùng cùng công thức board.html: minDistance = nửa bàn / tan(fovY/2)
+  // → khi zoom min, cạnh bàn ≈ chiều ngang (hoặc cao) màn hình
+  setPhoneZoomLimits();
+  // Đặt camera thẳng đứng trên tâm
+  const d = controls.minDistance;
+  camera.position.set(0, d, 0.01);
+  controls.update();
+}
+
+
+/** Camera 45° elevation, 45° offset từ phía sau hướng di chuyển */
+function cameraBehindMove(fromGx, fromGy, toGx, toGy) {
+  const from = P(fromGx, fromGy, 0);
+  const to = P(toGx, toGy, 0);
+  const dir = new THREE.Vector3().subVectors(to, from);
+  if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+  dir.y = 0;
+  dir.normalize();
+  const dist = 14;
+  const el = Math.PI / 4;
+  const behind = dir.clone().multiplyScalar(-dist * Math.cos(el));
+  const target = to.clone();
+  target.y = 0.5;
+  camera.position.set(
+    target.x + behind.x,
+    dist * Math.sin(el) + 2,
+    target.z + behind.z
+  );
+  controls.target.copy(target);
+  controls.minPolarAngle = 0.2;
+  controls.maxPolarAngle = 1.4;
+  setPhoneZoomLimits();
+  controls.update();
+}
+
+function cameraOverview() {
+  controls.target.set(0, 0, 0);
+  setPhoneZoomLimits();
+  const d = controls.maxDistance;
+  camera.position.set(0, d * 0.72, d * 0.55);
+  controls.minPolarAngle = 0.2;
+  controls.maxPolarAngle = 1.45;
+  controls.update();
+}
+
+function cameraDefault() {
+  controls.target.set(0, 0, 0);
+  setPhoneZoomLimits();
+  const d = (controls.minDistance + controls.maxDistance) * 0.45;
+  camera.position.set(0, d * 0.75, d * 0.6);
+  controls.minPolarAngle = 0.25;
+  controls.maxPolarAngle = 1.4;
+  controls.update();
+}
+
+
+function clearBlink() {
+  selectableLogicIds = new Set();
+  selectMode = null;
+  allHorses.forEach(h => {
+    try {
+      const base = h.size || HORSE_SIZE;
+      h.root.scale.setScalar(base);
+    } catch (e) {}
+  });
+}
+
+function setHorseBlink(logicIds) {
+  clearBlink();
+  selectMode = 'horse';
+  selectableLogicIds = new Set(logicIds || []);
+}
+
+function showTargetMarkers(targets) {
+  clearMarkers();
+  if (!targets || !targets.length) return;
+  targets.forEach(t => {
+    if (t == null || t.gx == null) return;
+    const mesh = new THREE.Mesh(markerGeo, markerMat.clone());
+    mesh.position.copy(P(t.gx, t.gy, 0.12));
+    mesh.userData.marker = true;
+    mesh.userData.gx = t.gx;
+    mesh.userData.gy = t.gy;
+    markerGroup.add(mesh);
+    activeMarkers.push({ mesh, gx: t.gx, gy: t.gy });
+  });
+}
+
+window.BoardAPI = {
+  enableGameMode(on) { gameMode = !!on; deselect(); clearChoiceButtons(); clearBlink(); },
+  syncState: syncFromState,
+  showChoices: showChoiceButtons,
+  clearChoices() { clearChoiceButtons(); clearMarkers(); },
+  cameraToPen, cameraTopDown, cameraDefault, cameraBehindMove, cameraOverview,
+  setHorseBlink, clearBlink, showTargetMarkers,
+  async playSteps(logicId, cells, opts) {
+    const horse = findHorseByLogicId(logicId);
+    if (!horse) return false;
+    await animateSteps(horse, cells, opts || {});
+    return true;
+  },
+  async playFly(logicId, cells) {
+    const horse = findHorseByLogicId(logicId);
+    if (!horse || !cells || !cells.length) return false;
+    playSfx(sfxFlyAway);
+    await animateSteps(horse, cells, { silentLand: true });
+    playSfx(sfxLand); // a1 kết thúc bay
+    return true;
+  },
+  async playKickReturn(logicId, toGx, toGy, opts) {
+    const horse = findHorseByLogicId(logicId);
+    if (!horse) return false;
+    await animateKickReturn(horse, toGx, toGy, opts || {});
+    return true;
+  },
+  getReady() { return true; }
+};
+
+(function assignLogicIds() {
+  const byPen = {};
+  allHorses.forEach(h => {
+    byPen[h.penId] = byPen[h.penId] || [];
+    byPen[h.penId].push(h);
+  });
+  Object.keys(byPen).forEach(pid => {
+    byPen[pid].forEach((h, i) => {
+      h._slotIndex = i;
+      h.logicId = (+pid) * 4 + i;
+    });
+  });
+})();
+
+const _origPointerUp = onPointerUp;
+onPointerUp = function(e) {
+  if (!pointerDownPos) return;
+  const p = getPointerNDC(e);
+  const dx = p.x - pointerDownPos.x, dy = p.y - pointerDownPos.y;
+  pointerDownPos = null;
+  if (Math.hypot(dx, dy) > CLICK_THRESH) return;
+  raycaster.setFromCamera(pointer, camera);
+
+  if (gameMode) {
+    // 3D choice sprites
+    if (choiceButtons.length) {
+      const meshes = choiceButtons.map(c => c.mesh);
+      const hits = raycaster.intersectObjects(meshes, false);
+      if (hits.length) {
+        const mv = hits[0].object.userData.choice;
+        clearChoiceButtons(); clearMarkers();
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'board-choice', move: mv }, '*');
+        }
+        return;
+      }
+    }
+    // select horse mode
+    if (selectMode === 'horse' && selectableLogicIds.size) {
+      const horseRoots = allHorses.map(h => h.root);
+      const hits = raycaster.intersectObjects(horseRoots, true);
+      if (hits.length) {
+        let obj = hits[0].object;
+        while (obj && !obj.userData.horse3d) obj = obj.parent;
+        if (obj && obj.userData.horse3d) {
+          const h = obj.userData.horse3d;
+          if (selectableLogicIds.has(h.logicId)) {
+            clearBlink(); clearMarkers();
+            if (window.parent && window.parent !== window) {
+              window.parent.postMessage({ type: 'board-horse', logicId: h.logicId }, '*');
+            }
+            return;
+          }
+        }
+      }
+    }
+    return;
+  }
+  return _origPointerUp(e);
+};
+renderer.domElement.removeEventListener('pointerup', _origPointerUp);
+renderer.domElement.addEventListener('pointerup', onPointerUp, { passive: true });
+
+if (window.parent && window.parent !== window) {
+  window.parent.postMessage({ type: 'board-ready' }, '*');
+}
+
+
+/* —— loop —— */
+let lastT = performance.now();
+(function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = (now - lastT) / 1000;
+  lastT = now;
+  allHorses.forEach(h => h.update(dt));
+  // nhẹ nhàng nhấp nháy markers
+  const pulse = 0.85 + 0.15 * Math.sin(now * 0.006);
+  activeMarkers.forEach(m => { m.mesh.scale.setScalar(pulse); });
+  choiceButtons.forEach(c => {
+    const baseY = c.mesh.userData.baseY;
+    if (baseY == null) c.mesh.userData.baseY = c.mesh.position.y;
+    c.mesh.position.y = c.mesh.userData.baseY + 0.12 * Math.sin(now * 0.004 + c.mesh.position.x);
+    c.mesh.scale.setScalar(pulse * 1.05);
+  });
+  // nhấp nháy quân chọn được
+  if (selectableLogicIds.size) {
+    const s = 1 + 0.12 * Math.sin(now * 0.01);
+    allHorses.forEach(h => {
+      if (selectableLogicIds.has(h.logicId)) {
+        h.root.scale.setScalar((h.size || HORSE_SIZE) * s);
+      }
+    });
+  }
+  controls.update();
+  renderer.render(scene, camera);
+})(performance.now());
+</script>
+</body>
+</html>
